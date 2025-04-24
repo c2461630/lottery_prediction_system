@@ -1,0 +1,80 @@
+body {
+    padding-top: 20px;
+    background-color: #f8f9fa;
+}
+
+.container {
+    max-width: 960px;
+}
+
+.prediction-card {
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s;
+}
+
+.prediction-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.number-ball {
+    display: inline-block;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background-color: #007bff;
+    color: white;
+    text-align: center;
+    line-height: 40px;
+    margin-right: 10px;
+    font-weight: bold;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.card {
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.card-header {
+    background-color: #f1f8ff;
+    border-bottom: 1px solid #d1e7ff;
+}
+
+.btn {
+    border-radius: 5px;
+    font-weight: 500;
+}
+
+.btn-primary {
+    background-color: #0d6efd;
+}
+
+.btn-success {
+    background-color: #198754;
+}
+
+.btn-info {
+    background-color: #0dcaf0;
+    color: #000;
+}
+
+.btn-warning {
+    background-color: #ffc107;
+    color: #000;
+}
+
+.btn-secondary {
+    background-color: #6c757d;
+}
+
+.table {
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.alert {
+    border-radius: 5px;
+}

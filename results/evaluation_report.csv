@@ -1,0 +1,2 @@
+avg_hit_rate,hit_count_3_plus_percentage,kl_divergence,ks_statistic,cosine_similarity,intra_set_diversity,inter_set_diversity,composite_score
+0.0,0.0,0.22891515225929165,0.7959183673469388,0.0,1.0,1.0,0.444117748445421
