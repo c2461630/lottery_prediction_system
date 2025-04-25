@@ -30,14 +30,28 @@ class DiversityEnhancer:
         # 檢查預測結果格式並標準化
         formatted_predictions = self._format_predictions(predictions)
         
+        # 檢查是否所有預測都相同
+        all_same = True
+        if formatted_predictions and len(formatted_predictions) > 1:
+            first_pred = str(formatted_predictions[0])
+            for pred in formatted_predictions[1:]:
+                if str(pred) != first_pred:
+                    all_same = False
+                    break
+        
+        # 如果所有預測都相同，強制使用更高的多樣性
+        temp_diversity_degree = self.diversity_degree
+        if all_same:
+            temp_diversity_degree = max(0.8, self.diversity_degree * 2)  # 更激進的多樣性增強
+        
         if method == 'mutation':
-            enhanced = self._enhance_by_mutation(formatted_predictions, self.diversity_degree)
+            enhanced = self._enhance_by_mutation(formatted_predictions, temp_diversity_degree)
         elif method == 'clustering':
             enhanced = self._enhance_by_clustering(formatted_predictions)
         elif method == 'hybrid':
             # 先使用聚類，然後對結果進行變異
-            clustered = self._enhance_by_clustering(formatted_predictions)
-            enhanced = self._enhance_by_mutation(clustered, self.diversity_degree)
+            clustered = self._enhance_by_clustering(formatted_predictions, diversity_level=temp_diversity_degree)
+            enhanced = self._enhance_by_mutation(clustered, diversity_level=temp_diversity_degree)
         else:
             logger.warning(f"未知的多樣性增強方法: {method}，使用原始預測")
             enhanced = formatted_predictions
@@ -60,8 +74,73 @@ class DiversityEnhancer:
             if len(enhanced) > num_sets:
                 enhanced = enhanced[:num_sets]
         
+        # 最後檢查是否仍然有重複的預測
+        if enhanced:
+            unique_preds = set()
+            for i, pred_set in enumerate(enhanced):
+                pred_str = str(pred_set)
+                if pred_str in unique_preds:
+                    # 如果有重複，生成一個新的變異版本
+                    new_pred_set = []
+                    for numbers in pred_set:
+                        new_numbers = list(numbers)
+                        # 變異2-3個號碼
+                        mutation_count = random.randint(2, 3)
+                        positions = random.sample(range(len(new_numbers)), min(mutation_count, len(new_numbers)))
+                        
+                        for pos in positions:
+                            available_numbers = [n for n in range(1, 50) if n not in new_numbers]
+                            if available_numbers:
+                                new_numbers[pos] = random.choice(available_numbers)
+                        
+                        new_pred_set.append(sorted(new_numbers))
+                    
+                    enhanced[i] = new_pred_set
+                else:
+                    unique_preds.add(pred_str)
+        
+        # 最後檢查增強後的預測是否仍然全部相同
+        all_same_after = True
+        if enhanced and len(enhanced) > 1:
+            first_enhanced = str(enhanced[0])
+            for e in enhanced[1:]:
+                if str(e) != first_enhanced:
+                    all_same_after = False
+                    break
+        
+        # 如果仍然全部相同，強制進行更激進的變異
+        if all_same_after:
+            logger.warning("增強後的預測仍然全部相同，進行強制多樣化")
+            forced_diverse = []
+            base_pred = enhanced[0]
+            
+            for i in range(len(enhanced)):
+                if i == 0:
+                    forced_diverse.append(base_pred)  # 保留一個原始預測
+                    continue
+                    
+                # 為其他預測創建顯著不同的變體
+                new_pred = []
+                for numbers in base_pred:
+                    new_numbers = list(numbers)
+                    # 變異至少一半的號碼
+                    mutation_count = max(len(new_numbers) // 2, 2)
+                    positions = random.sample(range(len(new_numbers)), mutation_count)
+                    
+                    for pos in positions:
+                        available_numbers = [n for n in range(1, 50) if n not in new_numbers]
+                        if available_numbers:
+                            new_numbers[pos] = random.choice(available_numbers)
+                    
+                    new_pred.append(sorted(new_numbers))
+                
+                forced_diverse.append(new_pred)
+            
+            enhanced = forced_diverse
+        
         return enhanced
-    
+
+
     def _format_predictions(self, predictions):
         """標準化預測結果格式
         
@@ -129,14 +208,22 @@ class DiversityEnhancer:
             logger.warning(f"無法處理的預測格式: {type(predictions)}")
             return []
     
-    def _enhance_by_mutation(self, predictions, diversity_level):
+    def _enhance_by_mutation(self, predictions, diversity_level=0.2, num_sets=None):
         """通過變異增強多樣性"""
         if not predictions:
             return []
         
         enhanced_predictions = []
         
-        for pred_set in predictions:
+        # 如果指定了 num_sets，則生成指定數量的預測組
+        target_sets = num_sets if num_sets is not None else len(predictions)
+        
+        # 確保我們有足夠的預測組作為基礎
+        base_predictions = predictions
+        while len(base_predictions) < target_sets:
+            base_predictions.extend(predictions[:target_sets-len(base_predictions)])
+        
+        for pred_set in base_predictions[:target_sets]:
             enhanced_set = []
             
             for numbers in pred_set:
@@ -151,7 +238,8 @@ class DiversityEnhancer:
                 new_numbers = list(numbers)
                 
                 # 根據多樣性程度決定變異的號碼數量
-                mutation_count = int(len(numbers) * diversity_level)
+                # 增加變異數量，確保至少有1-2個號碼變異
+                mutation_count = max(2, int(len(numbers) * diversity_level))  # 確保至少變異2個號碼
                 
                 if mutation_count > 0:
                     # 隨機選擇要變異的位置
@@ -171,10 +259,23 @@ class DiversityEnhancer:
         
         return enhanced_predictions
     
-    def _enhance_by_clustering(self, predictions):
+    def _enhance_by_clustering(self, predictions, diversity_level=0.2, num_sets=None):
         """通過聚類增強多樣性"""
         if not predictions:
             return []
+        
+        # 檢查是否所有預測都相同
+        all_same = True
+        if len(predictions) > 1:
+            first_pred = str(predictions[0])
+            for pred in predictions[1:]:
+                if str(pred) != first_pred:
+                    all_same = False
+                    break
+        
+        # 如果所有預測都相同或只有一組預測，直接使用變異法
+        if all_same or len(predictions) == 1:
+            return self._enhance_by_mutation(predictions, diversity_level=max(0.5, diversity_level*2), num_sets=num_sets)
         
         # 將所有預測展平為特徵向量
         all_numbers = []
@@ -201,13 +302,35 @@ class DiversityEnhancer:
                 all_numbers.append((numbers, vector))
         
         if len(all_numbers) <= 1:
-            return predictions
+            # 如果只有一組預測，直接生成多個變異版本
+            base_numbers = all_numbers[0][0]
+            enhanced_predictions = []
+            
+            for _ in range(len(predictions)):
+                pred_set = []
+                for _ in range(len(predictions[0])):
+                    # 創建變異版本
+                    new_numbers = list(base_numbers)
+                    # 隨機變異2-3個號碼
+                    mutation_count = random.randint(2, 3)
+                    positions = random.sample(range(len(new_numbers)), mutation_count)
+                    
+                    for pos in positions:
+                        available_numbers = [n for n in range(1, 50) if n not in new_numbers]
+                        if available_numbers:
+                            new_numbers[pos] = random.choice(available_numbers)
+                    
+                    pred_set.append(sorted(new_numbers))
+                
+                enhanced_predictions.append(pred_set)
+            
+            return enhanced_predictions
         
         # 提取特徵向量
         vectors = np.array([v for _, v in all_numbers])
         
-        # 使用K-means聚類
-        n_clusters = min(5, len(vectors))
+        # 使用K-means聚類，但減少聚類數量以避免警告
+        n_clusters = min(3, len(vectors))
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         clusters = kmeans.fit_predict(vectors)
         
@@ -227,14 +350,19 @@ class DiversityEnhancer:
             for rep in list(representatives):  # 使用副本避免無限循環
                 if len(representatives) >= len(predictions) * len(predictions[0]):
                     break
-                    
+                
                 # 創建變異版本
                 new_rep = list(rep)
-                pos = random.randint(0, len(new_rep)-1)
-                available_numbers = [n for n in range(1, 50) if n not in new_rep]
-                if available_numbers:
-                    new_rep[pos] = random.choice(available_numbers)
-                    representatives.append(sorted(new_rep))
+                # 變異多個位置以增加多樣性
+                mutation_count = random.randint(2, 3)
+                positions = random.sample(range(len(new_rep)), min(mutation_count, len(new_rep)))
+                
+                for pos in positions:
+                    available_numbers = [n for n in range(1, 50) if n not in new_rep]
+                    if available_numbers:
+                        new_rep[pos] = random.choice(available_numbers)
+                
+                representatives.append(sorted(new_rep))
         
         # 重新組織為原始預測的格式
         for i in range(len(predictions)):

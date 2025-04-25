@@ -268,6 +268,22 @@ class LotteryFeatureEngineering:
         logger.info(f"基本特徵創建完成，共 {len(new_features.columns)} 個特徵")
         return df
     
+    def create_complex_features(self):
+        """創建複雜特徵（包括基本特徵和進階特徵）
+        
+        返回:
+            features: 包含所有特徵的 DataFrame
+        """
+        # 創建基本特徵
+        self.create_basic_features()
+        
+        # 創建進階特徵
+        self.create_advanced_features()
+        
+        # 返回特徵
+        return self.features
+
+
     def extract_features(self, data=None):
         """提取特徵（優化版本）"""
         if data is None:
@@ -312,257 +328,271 @@ class LotteryFeatureEngineering:
         feature_df.columns = ['frequency', 'recency', 'is_hot', 'is_cold', 'gap', 'pair_frequency']
         
         # 標準化特徵
-        feature_df_scaled = pd.DataFrame(
-            self.scaler.fit_transform(feature_df),
-            index=feature_df.index,
-            columns=feature_df.columns
-        )
+        feature_df = pd.DataFrame(self.scaler.fit_transform(feature_df), 
+                                 index=feature_df.index, 
+                                 columns=feature_df.columns)
         
-        # 添加高級特徵
-        if self.features is not None:
-            # 添加時間特徵
-            if 'date' in self.features.columns:
-                date_features = self.features[['date']].copy()
-                date_features['year'] = date_features['date'].dt.year
-                date_features['month'] = date_features['date'].dt.month
-                date_features['day_of_week'] = date_features['date'].dt.dayofweek
-                
-                # 將時間特徵與號碼特徵結合
-                for num in range(1, 50):
-                    if num in feature_df_scaled.index:
-                        for date_col in ['year', 'month', 'day_of_week']:
-                            feature_df_scaled.loc[num, f'{date_col}_effect'] = date_features[date_col].corr(
-                                self.features.apply(lambda row: 1 if num in row.values else 0, axis=1)
-                            )
-        
-        end_time = time.time()
-        logger.info(f"特徵提取完成，耗時: {end_time - start_time:.2f} 秒")
-        
-        return feature_df_scaled
+        logger.info(f"特徵提取完成，耗時 {time.time() - start_time:.2f} 秒")
+        return feature_df
     
     def create_advanced_features(self):
         """創建進階特徵"""
         if self.data is None:
-            logger.error("未載入數據，無法創建特徵")
+            logger.error("未載入數據，無法創建進階特徵")
             return None
             
-        df = self.features.copy() if self.features is not None else self.create_basic_features()
         logger.info("開始創建進階特徵...")
+        df = self.data.copy()
+        
+        # 如果已經創建了基本特徵，則使用它
+        if self.features is not None:
+            df = self.features.copy()
         
         # 創建所有進階特徵的字典
         features_dict = {}
         
-        # 獲取數字列
-        num_cols = [col for col in df.columns if col.startswith('num') and len(col) <= 4]  # 排除衍生特徵
+        # 數字列
+        num_cols = [col for col in df.columns if col.startswith('num')]
         
-        # 歷史統計特徵
-        for col in num_cols:
-            # 計算每個數字的歷史出現頻率
-            for window in [5, 10, 20]:
-                if len(df) > window:
-                    features_dict[f'{col}_freq_{window}'] = df[col].rolling(window=window).apply(
-                        lambda x: (x == df[col].iloc[-1]).mean() if len(x) > 0 and not pd.isna(df[col].iloc[-1]) else 0,
-                        raw=True
-                    ).fillna(0)
+        # 創建滯後特徵 (前N期的號碼)
+        for lag in range(1, 4):  # 創建前3期的滯後特徵
+            for col in num_cols:
+                features_dict[f'{col}_lag{lag}'] = df[col].shift(lag)
         
-        # 計算每個數字與前N期的差異
-        for col in num_cols:
-            for lag in [1, 2, 3]:
-                if len(df) > lag:
-                    features_dict[f'{col}_lag_{lag}'] = df[col].shift(lag).fillna(-1).astype(int)
-                    features_dict[f'{col}_diff_{lag}'] = df[col] - features_dict[f'{col}_lag_{lag}']
+        # 創建滾動統計特徵
+        windows = [3, 5, 10]
+        for window in windows:
+            features_dict[f'sum_all_roll{window}'] = df[[c for c in df.columns if c.startswith('sum_all')]].rolling(window).mean().iloc[:, 0]
+            features_dict[f'mean_all_roll{window}'] = df[[c for c in df.columns if c.startswith('mean_all')]].rolling(window).mean().iloc[:, 0]
+            features_dict[f'std_all_roll{window}'] = df[[c for c in df.columns if c.startswith('std_all')]].rolling(window).mean().iloc[:, 0]
         
-        # 數字區間特徵
-        for col in num_cols:
-            features_dict[f'{col}_range'] = pd.cut(
-                df[col], 
-                bins=[0, 10, 20, 30, 40, 50], 
-                labels=[1, 2, 3, 4, 5]
-            ).astype(int)
-        
-        # 自相關特徵
-        for col in num_cols:
-            # 計算自相關係數
-            try:
-                if len(df) > 10:  # 確保有足夠的數據
-                    acf_values = acf(df[col].dropna(), nlags=min(5, len(df)-1))
-                    for lag in range(1, min(6, len(acf_values))):
-                        features_dict[f'{col}_acf_{lag}'] = np.full(len(df), acf_values[lag])
-            except Exception as e:
-                logger.warning(f"計算自相關係數時出錯: {str(e)}")
-                # 如果計算失敗，填充0
-                for lag in range(1, 6):
-                    features_dict[f'{col}_acf_{lag}'] = np.full(len(df), 0)
-        
-        # 數字組合模式
-        odd_count_cols = [f'{col}_is_odd' for col in num_cols]
-        prime_count_cols = [f'{col}_is_prime' for col in num_cols]
-        
-        if all(col in df.columns for col in odd_count_cols):
-            features_dict['odd_count'] = df[odd_count_cols].sum(axis=1)
-        
-        if all(col in df.columns for col in prime_count_cols):
-            features_dict['prime_count'] = df[prime_count_cols].sum(axis=1)
-        
-        # 數字間隔特徵
-        for i, col1 in enumerate(num_cols):
-            for col2 in num_cols[i+1:]:
-                features_dict[f'diff_{col1}_{col2}'] = df[col2] - df[col1]
-        
-        # 熱門數字特徵
-        for col in num_cols:
-            window_size = min(100, len(df))
-            if window_size > 0:
-                features_dict[f'{col}_popularity'] = df[col].rolling(window=window_size).apply(
-                    lambda x: pd.Series(x).value_counts().get(df[col].iloc[-1], 0) if not pd.isna(df[col].iloc[-1]) else 0,
-                    raw=True
-                ).fillna(0)
+        # 創建複雜性特徵
+        features_dict['entropy'] = df.apply(lambda row: self._calculate_entropy([row[col] for col in num_cols]), axis=1)
+        features_dict['sequence_pattern'] = df.apply(lambda row: self._get_sequence_pattern([row[col] for col in num_cols]), axis=1)
+        features_dict['distribution_score'] = df.apply(lambda row: self._calculate_distribution_score([row[col] for col in num_cols]), axis=1)
+        features_dict['complexity_score'] = df.apply(lambda row: self._calculate_complexity([row[col] for col in num_cols]), axis=1)
         
         # 一次性將所有特徵添加到DataFrame
         new_features = pd.DataFrame(features_dict, index=df.index)
         df = pd.concat([df, new_features], axis=1)
+        
+        # 填充NaN值
+        df = df.fillna(method='bfill').fillna(method='ffill').fillna(0)
         
         self.features = df
         logger.info(f"進階特徵創建完成，共 {len(new_features.columns)} 個特徵")
         return df
     
-    def create_complex_features(self):
-        """創建複雜特徵"""
-        if self.data is None:
-            logger.error("未載入數據，無法創建特徵")
+    def get_latest_features(self, n_previous=5):
+        """獲取最新的特徵用於預測"""
+        if self.features is None:
+            logger.error("未創建特徵，無法獲取最新特徵")
             return None
             
-        df = self.features.copy() if self.features is not None else self.create_advanced_features()
-        logger.info("開始創建複雜特徵...")
+        # 獲取最新的n_previous期數據
+        latest_features = self.features.iloc[-n_previous:].copy()
         
-        # 創建所有複雜特徵的字典
-        features_dict = {}
+        # 移除目標變數（下一期的號碼）
+        target_cols = [col for col in latest_features.columns if col.startswith('next_')]
+        if target_cols:
+            latest_features = latest_features.drop(columns=target_cols)
         
-        # 獲取數字列
-        num_cols = [col for col in df.columns if col.startswith('num') and len(col) <= 4]  # 排除衍生特徵
-        
-        # 數字組合熵
-        features_dict['number_entropy'] = df.apply(
-            lambda x: self._calculate_entropy([x[col] for col in num_cols if col in x]), 
-            axis=1
-        )
-        
-        # 數字序列模式
-        features_dict['sequence_pattern'] = df.apply(
-            lambda x: self._get_sequence_pattern([x[col] for col in num_cols if col in x]), 
-            axis=1
-        )
-        
-        # 數字分佈特徵
-        features_dict['distribution_score'] = df.apply(
-            lambda x: self._calculate_distribution_score([x[col] for col in num_cols if col in x]), 
-            axis=1
-        )
-        
-        # 數字重複模式
-        for window in [10, 20]:
-            window = min(window, len(df) - 1)  # 確保窗口大小不超過數據長度
-            if window > 0:
-                for col in num_cols:
-                    # 計算過去window期內，當前數字重複出現的次數
-                    features_dict[f'{col}_repeat_in_{window}'] = df[col].rolling(window=window).apply(
-                        lambda x: (x == x[-1]).sum() - 1 if len(x) > 0 and not pd.isna(x[-1]) else 0,
-                        raw=True
-                    ).fillna(0)
-        
-        # 歷史趨勢特徵
-        for col in num_cols:
-            # 計算過去10期的趨勢斜率，確保窗口大小合適
-            window_size = min(10, len(df) - 1)
-            if window_size > 1:  # 至少需要2個點來計算趨勢
-                try:
-                    features_dict[f'{col}_trend_{window_size}'] = df[col].rolling(window=window_size).apply(
-                        lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) > 1 else 0,
-                        raw=True
-                    ).fillna(0)
-                except Exception as e:
-                    logger.warning(f"計算趨勢特徵時出錯: {str(e)}")
-                    # 如果計算失敗，填充0
-                    features_dict[f'{col}_trend_{window_size}'] = np.zeros(len(df))
-        
-        # 數字組合的複雜性
-        features_dict['complexity_score'] = df.apply(
-            lambda x: self._calculate_complexity([x[col] for col in num_cols if col in x]), 
-            axis=1
-        )
-        
-        # 一次性將所有特徵添加到DataFrame
-        new_features = pd.DataFrame(features_dict, index=df.index)
-        df = pd.concat([df, new_features], axis=1)
-        
-        self.features = df
-        logger.info(f"複雜特徵創建完成，共 {len(new_features.columns)} 個特徵")
-        return df
+        return latest_features
     
-    def get_training_data(self, target_cols=None, lag_periods=1):
-        """準備訓練數據，使用歷史數據預測未來"""
-        if self.data is None:
-            logger.error("未載入數據，無法準備訓練數據")
-            return None, None
-            
+    def prepare_train_test_data(self, test_size=0.2, target_cols=None):
+        """準備訓練和測試數據"""
         if self.features is None:
-            self.create_complex_features()
-        
-        logger.info("開始準備訓練數據...")
-        df = self.features.copy()
-        
+            logger.error("未創建特徵，無法準備訓練數據")
+            return None, None, None, None
+            
+        # 如果未指定目標列，則使用所有num開頭的列
         if target_cols is None:
-            # 獲取所有數字列作為目標
-            target_cols = [col for col in df.columns if col.startswith('num') and len(col) <= 4]
+            target_cols = [col for col in self.features.columns if col.startswith('num')]
         
         # 創建目標變數（下一期的號碼）
-        target_dict = {}
-        for col in target_cols:
-            target_dict[f'next_{col}'] = df[col].shift(-lag_periods)
+        y = self.features[target_cols].shift(-1)
         
-        # 一次性添加所有目標變數
-        df = pd.concat([df, pd.DataFrame(target_dict, index=df.index)], axis=1)
+        # 移除目標變數和不需要的列
+        X = self.features.drop(columns=target_cols + ['date'])
         
-        # 移除包含NaN的行
-        df = df.dropna()
+        # 移除含有NaN的行
+        valid_idx = ~y.isnull().any(axis=1)
+        X = X[valid_idx]
+        y = y[valid_idx]
         
-        # 分離特徵和目標
-        X = df.drop(columns=['date'] + [f'next_{col}' for col in target_cols] + target_cols)
-        y = df[[f'next_{col}' for col in target_cols]]
+        # 分割訓練集和測試集
+        split_idx = int(len(X) * (1 - test_size))
+        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
         
-        logger.info(f"訓練數據準備完成，特徵數量: {X.shape[1]}, 樣本數量: {X.shape[0]}")
-        return X, y
+        logger.info(f"準備訓練和測試數據完成，訓練集大小: {X_train.shape}, 測試集大小: {X_test.shape}")
+        return X_train, X_test, y_train, y_test
     
-    def combine_feature_sets(self):
-        """結合所有特徵集，創建完整的特徵集"""
-        if self.data is None:
-            logger.error("未載入數據，無法創建特徵")
-            return None
+    def get_training_data(self):
+        """獲取訓練數據
+        
+        返回:
+            X: 特徵矩陣
+            y: 目標變數
+        """
+        if self.features is None:
+            # 如果特徵尚未創建，先創建基本和進階特徵
+            self.create_basic_features()
+            self.create_advanced_features()
+        
+        # 獲取號碼列作為目標變數
+        target_cols = [col for col in self.data.columns if col.startswith('num')]
+        
+        # 創建目標變數（當前期的號碼）
+        y = self.data[target_cols]
+        
+        # 移除目標變數和不需要的列
+        X = self.features.drop(columns=target_cols + ['date'])
+        
+        # 移除含有NaN的行
+        valid_idx = ~X.isnull().any(axis=1) & ~y.isnull().any(axis=1)
+        X = X[valid_idx]
+        y = y[valid_idx]
+        
+        # 記錄日誌
+        logger.info(f"獲取訓練數據完成，特徵矩陣大小: {X.shape}, 目標變數大小: {y.shape}")
+        
+        return X, y
+
+
+    def analyze_correlations(self):
+        """分析號碼之間的相關性"""
+        # 載入數據
+        df = self.load_data()
+        
+        # 只選擇號碼列
+        number_cols = [col for col in df.columns if col.startswith('num')]
+        
+        # 創建一個新的DataFrame來存儲每個號碼的出現情況
+        all_numbers = range(1, 50)  # 假設彩球範圍是1-49
+        occurrence_df = pd.DataFrame(index=df.index, columns=[f'num_{i}' for i in all_numbers])
+        
+        # 填充出現情況 (1表示出現，0表示未出現)
+        for idx, row in df.iterrows():
+            drawn_numbers = [row[col] for col in number_cols if pd.notna(row[col])]
+            for num in all_numbers:
+                occurrence_df.loc[idx, f'num_{num}'] = 1 if num in drawn_numbers else 0
+        
+        # 計算相關性矩陣
+        corr_matrix = occurrence_df.corr()
+        
+        # 找出最強的正相關和負相關
+        strongest_positive = []
+        strongest_negative = []
+        
+        # 遍歷相關性矩陣的上三角部分
+        for i in range(len(all_numbers)):
+            for j in range(i+1, len(all_numbers)):
+                num1 = i + 1
+                num2 = j + 1
+                col1 = f'num_{num1}'
+                col2 = f'num_{num2}'
+                
+                if col1 in corr_matrix.columns and col2 in corr_matrix.columns:
+                    corr = corr_matrix.loc[col1, col2]
+                    
+                    pair = f"{num1}-{num2}"
+                    if corr > 0:
+                        strongest_positive.append({"pair": pair, "correlation": corr})
+                    else:
+                        strongest_negative.append({"pair": pair, "correlation": corr})
+        
+        # 排序
+        strongest_positive = sorted(strongest_positive, key=lambda x: x["correlation"], reverse=True)[:5]
+        strongest_negative = sorted(strongest_negative, key=lambda x: x["correlation"])[:5]
+        
+        return {
+            "strongest_positive": strongest_positive,
+            "strongest_negative": strongest_negative
+        }
+
+    def analyze_periodicity(self):
+        """分析號碼的週期性"""
+        # 載入數據
+        df = self.load_data()
+        
+        # 只選擇號碼列
+        number_cols = [col for col in df.columns if col.startswith('num')]
+        
+        # 計算每個可能號碼的週期性
+        all_numbers = range(1, 50)  # 假設彩球範圍是1-49
+        periodicity = []
+        
+        for num in all_numbers:
+            # 找出該號碼出現的所有期數
+            appearances = []
+            for idx, row in df.iterrows():
+                drawn_numbers = [row[col] for col in number_cols if pd.notna(row[col])]
+                if num in drawn_numbers:
+                    appearances.append(idx)
             
-        logger.info("開始結合所有特徵集...")
+            # 計算間隔
+            if len(appearances) > 1:
+                intervals = [appearances[i+1] - appearances[i] for i in range(len(appearances)-1)]
+                # 計算變異係數 (標準差/平均值)
+                mean_interval = np.mean(intervals)
+                if mean_interval > 0:
+                    cv = np.std(intervals) / mean_interval
+                    periodicity.append({"number": num, "cv": cv})
         
-        # 創建基本特徵
-        self.create_basic_features()
+        # 排序，CV 越高表示週期性越強
+        periodicity = sorted(periodicity, key=lambda x: x["cv"], reverse=True)[:10]
         
-        # 創建進階特徵
-        self.create_advanced_features()
+        return periodicity
+
+    def analyze_trends(self):
+        """分析號碼的趨勢"""
+        # 載入數據
+        df = self.load_data()
         
-        # 創建複雜特徵
-        self.create_complex_features()
+        # 只選擇號碼列
+        number_cols = [col for col in df.columns if col.startswith('num')]
         
-        # 提取優化特徵
-        optimized_features = self.extract_features()
+        # 計算每個可能號碼的趨勢
+        all_numbers = range(1, 50)  # 假設彩球範圍是1-49
+        rising = []
+        falling = []
         
-        # 將優化特徵添加到主特徵集
-        if isinstance(optimized_features, pd.DataFrame):
-            # 為每個號碼添加優化特徵
-            num_cols = [col for col in self.features.columns if col.startswith('num') and len(col) <= 4]
-            for col in num_cols:
-                for feat_col in optimized_features.columns:
-                    # 為每個數字列添加對應的優化特徵
-                    self.features[f'{col}_{feat_col}'] = self.features[col].map(
-                        lambda x: optimized_features.loc[x, feat_col] if x in optimized_features.index else 0
-                    )
+        # 定義早期和晚期的窗口大小
+        window_size = min(50, len(df) // 2)
         
-        logger.info(f"特徵結合完成，總特徵數量: {self.features.shape[1]}")
-        return self.features
+        for num in all_numbers:
+            # 計算早期窗口中號碼的出現頻率
+            early_count = 0
+            for idx in range(window_size):
+                if idx < len(df):
+                    drawn_numbers = [df.iloc[idx][col] for col in number_cols if pd.notna(df.iloc[idx][col])]
+                    if num in drawn_numbers:
+                        early_count += 1
+            freq_early = early_count / window_size if window_size > 0 else 0
+            
+            # 計算晚期窗口中號碼的出現頻率
+            late_count = 0
+            for idx in range(len(df) - window_size, len(df)):
+                if idx >= 0:
+                    drawn_numbers = [df.iloc[idx][col] for col in number_cols if pd.notna(df.iloc[idx][col])]
+                    if num in drawn_numbers:
+                        late_count += 1
+            freq_late = late_count / window_size if window_size > 0 else 0
+            
+            # 計算趨勢 (頻率變化)
+            trend = freq_late - freq_early
+            
+            if trend > 0:
+                rising.append({"number": num, "trend": trend})
+            else:
+                falling.append({"number": num, "trend": -trend})
+        
+        # 排序
+        rising = sorted(rising, key=lambda x: x["trend"], reverse=True)[:5]
+        falling = sorted(falling, key=lambda x: x["trend"], reverse=True)[:5]
+        
+        return {
+            "rising": rising,
+            "falling": falling
+        }

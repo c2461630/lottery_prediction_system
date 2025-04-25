@@ -8,309 +8,327 @@
     <link href="/static/css/style.css" rel="stylesheet">
 </head>
 <body>
-    <div class="container">
-        <h1 class="text-center mb-4">彩球預測系統</h1>
-        
-        <!-- 控制面板 -->
-        <div class="card mb-4">
-            <div class="card-header">控制面板</div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-3 mb-2">
-                        <button id="trainModelBtn" class="btn btn-primary w-100">訓練模型</button>
-                    </div>
-                    <div class="col-md-3 mb-2">
-                        <button id="predictBtn" class="btn btn-success w-100">生成預測</button>
-                    </div>
-                    <div class="col-md-3 mb-2">
-                        <button id="predictWithBestParamsBtn" class="btn btn-info w-100">使用最佳參數預測</button>
-                    </div>
-                    <div class="col-md-3 mb-2">
-                        <button id="optimizeBtn" class="btn btn-warning w-100">優化參數</button>
-                    </div>
-                </div>
-                <div class="row mt-2">
-                    <div class="col-md-3 mb-2">
-                        <button id="evaluatePredictionsBtn" class="btn btn-secondary w-100">評估預測</button>
-                    </div>
-                    <div class="col-md-3 mb-2">
-                        <button id="advancedAnalysisBtn" class="btn btn-secondary w-100">高級分析</button>
-                    </div>
-                    <div class="col-md-3 mb-2">
-                        <button id="diversitySettingsBtn" class="btn btn-secondary w-100">多樣性設置</button>
-                    </div>
-                    <div class="col-md-3 mb-2">
-                        <button id="optimizeSettingsBtn" class="btn btn-secondary w-100">優化設置</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
+    <div class="container-fluid">
         <div class="row">
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h5>訓練模型</h5>
-                    </div>
+            <!-- 左側控制面板 -->
+            <div class="col-md-3 sidebar">
+                <h2 class="text-center mb-4">彩球預測系統</h2>
+                <div class="card mb-4">
+                    <div class="card-header">控制面板</div>
                     <div class="card-body">
-                        <p>點擊下方按鈕開始訓練模型。這可能需要一些時間。</p>
-                        <button id="trainBtn" class="btn btn-primary">訓練模型</button>
-                        <div id="trainStatus" class="mt-3"></div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h5>生成預測</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <label for="modelSelect" class="form-label">選擇模型</label>
-                            <select id="modelSelect" class="form-select">
-                                <option value="ensemble">集成模型</option>
-                                <option value="random_forest">隨機森林</option>
-                                <option value="xgboost">XGBoost</option>
-                                <option value="lightgbm">LightGBM</option>
-                                <option value="catboost">CatBoost</option>
-                                <option value="neural_network">神經網絡</option>
-                            </select>
+                        <div class="control-group mb-3">
+                            <h5>模型操作</h5>
+                            <button id="trainModelBtn" class="btn btn-primary w-100 mb-2">訓練模型</button>
+                            <button id="predictBtn" class="btn btn-success w-100 mb-2">生成預測</button>
+                            <button id="predictWithBestParamsBtn" class="btn btn-info w-100 mb-2">使用最佳參數預測</button>
                         </div>
-                        <div class="mb-3">
-                            <label for="numSets" class="form-label">生成組數</label>
-                            <input type="number" id="numSets" class="form-control" min="1" max="10" value="5">
+                        
+                        <div class="control-group mb-3">
+                            <h5>評估與優化</h5>
+                            <button id="optimizeBtn" class="btn btn-warning w-100 mb-2">優化參數</button>
+                            <button id="evaluatePredictionsBtn" class="btn btn-secondary w-100 mb-2">評估預測</button>
+                            <button id="advancedAnalysisBtn" class="btn btn-secondary w-100 mb-2">高級分析</button>
                         </div>
-                        <div class="d-flex gap-2">
-                            <button id="predictBtn" class="btn btn-success">生成預測</button>
-                            <button id="predictWithBestParams" class="btn btn-info">使用最佳參數預測</button>
+                        
+                        <div class="control-group">
+                            <h5>設置</h5>
+                            <button id="diversitySettingsBtn" class="btn btn-secondary w-100 mb-2">多樣性設置</button>
+                            <button id="optimizeSettingsBtn" class="btn btn-secondary w-100 mb-2">優化設置</button>
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
-        
-        <div class="row mt-4">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header">
-                        <h5>預測結果</h5>
-                    </div>
-                    <div class="card-body">
-                        <div id="predictions" class="row"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="row mt-4">
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h5>評估預測</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <label class="form-label">實際開獎號碼</label>
-                            <div class="input-group">
-                                <input type="number" id="actualNum1" class="form-control" min="1" max="49" placeholder="號碼1">
-                                <input type="number" id="actualNum2" class="form-control" min="1" max="49" placeholder="號碼2">
-                                <input type="number" id="actualNum3" class="form-control" min="1" max="49" placeholder="號碼3">
-                                <input type="number" id="actualNum4" class="form-control" min="1" max="49" placeholder="號碼4">
-                                <input type="number" id="actualNum5" class="form-control" min="1" max="49" placeholder="號碼5">
-                            </div>
-                        </div>
-                        <button id="evaluateBtn" class="btn btn-info">評估預測</button>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h5>優化參數</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="form-group">
-                            <label for="model_name">模型類型</label>
-                            <select class="form-control" id="model_name" name="model_name">
-                                <option value="random_forest">Random Forest</option>
-                                <option value="xgboost">XGBoost</option>
-                                <option value="lightgbm">LightGBM</option>
-                                <option value="catboost">CatBoost</option>
-                                <option value="neural_network">Neural Network</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="n_trials">試驗次數</label>
-                            <input type="number" class="form-control" id="n_trials" name="n_trials" value="10" min="1" max="100">
-                        </div>
-                        <button id="startOptimizeBtn" class="btn btn-warning">尋找最佳參數</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- 添加多樣性設置模態框 -->
-        <div class="modal fade" id="diversityModal" tabindex="-1" aria-labelledby="diversityModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="diversityModalLabel">多樣性設置</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="mb-3">
-                            <label for="diversityMethod" class="form-label">多樣性方法</label>
-                            <select class="form-select" id="diversityMethod">
-                                <option value="mutation">變異法</option>
-                                <option value="clustering">聚類法</option>
-                                <option value="hybrid" selected>混合法</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label for="diversityLevel" class="form-label">多樣性程度 (0-1)</label>
-                            <input type="range" class="form-range" min="0" max="1" step="0.1" id="diversityLevel" value="0.2">
-                            <div class="d-flex justify-content-between">
-                                <span>低</span>
-                                <span>中</span>
-                                <span>高</span>
-                            </div>
-                        </div>
-                        <div class="alert alert-info">
-                            <small>多樣性程度越高，預測結果差異越大，但可能降低準確性。</small>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                        <button type="button" class="btn btn-primary" id="saveDiversitySettings">保存設置</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 添加優化設置模態框 -->
-        <div class="modal fade" id="optimizeModal" tabindex="-1" aria-labelledby="optimizeModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="optimizeModalLabel">參數優化設置</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="mb-3">
-                            <label for="optimizeTrials" class="form-label">優化試驗次數</label>
-                            <input type="number" class="form-control" id="optimizeTrials" value="100" min="10" max="1000">
-                            <div class="form-text">試驗次數越多，找到最佳參數的機會越大，但耗時也越長。</div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="optimizeActualNumbers" class="form-label">實際開獎號碼</label>
-                            <input type="text" class="form-control" id="optimizeActualNumbers" placeholder="例如: 1,2,3,4,5,6">
-                            <div class="form-text">輸入逗號分隔的實際開獎號碼，用於評估優化效果。</div>
-                        </div>
-                        <div class="alert alert-warning">
-                            <small>參數優化可能需要較長時間，請耐心等待。</small>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                        <button type="button" class="btn btn-primary" id="startOptimization">開始優化</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 添加評估結果區域 -->
-        <div class="row mt-4">
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header">評估結果</div>
-                    <div class="card-body">
-                        <div id="evaluationResults">
-                            <p class="text-muted">點擊「評估預測」按鈕查看評估結果。</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header">優化進度</div>
-                    <div class="card-body">
-                        <div id="optimizationProgress"></div>
-                        <div id="optimizationResults">
-                            <p class="text-muted">點擊「優化參數」按鈕開始參數優化。</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 添加高級分析結果區域 -->
-        <div class="row mt-4">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header">高級數據分析</div>
-                    <div class="card-body">
-                        <div id="analysisResults">
-                            <p class="text-muted">點擊「高級分析」按鈕查看詳細分析結果。</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 添加數據摘要區域 -->
-        <div class="row mt-4">
-            <div class="col-md-6">
-                <div class="card">
+                
+                <!-- 數據摘要區域 -->
+                <div class="card mb-4">
                     <div class="card-header">數據摘要</div>
                     <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <p><strong>總記錄數:</strong> <span id="totalRecords">-</span></p>
-                                <p><strong>熱門號碼:</strong></p>
-                                <div id="hotNumbers"></div>
-                                <p class="mt-2"><strong>冷門號碼:</strong></p>
-                                <div id="coldNumbers"></div>
+                        <p><strong>總記錄數:</strong> <span id="totalRecords">-</span></p>
+                        <p><strong>熱門號碼:</strong></p>
+                        <div id="hotNumbers"></div>
+                        <p class="mt-2"><strong>冷門號碼:</strong></p>
+                        <div id="coldNumbers"></div>
+                        <p class="mt-2"><strong>最近開獎結果:</strong></p>
+                        <div id="recentDraws"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 右側內容區域 -->
+            <div class="col-md-9 main-content">
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>訓練模型</h5>
                             </div>
-                            <div class="col-md-6">
-                                <p><strong>最近開獎結果:</strong></p>
-                                <div id="recentDraws"></div>
+                            <div class="card-body">
+                                <p>點擊下方按鈕開始訓練模型。這可能需要一些時間。</p>
+                                <div class="d-flex gap-2">
+                                    <button id="trainBtn" class="btn btn-primary">訓練模型</button>
+                                    <button id="stopTrainBtn" class="btn btn-danger" disabled>終止訓練</button>
+                                </div>
+                                <div id="trainStatus" class="mt-3"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>生成預測</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label for="modelSelect" class="form-label">選擇模型</label>
+                                    <select id="modelSelect" class="form-select">
+                                        <option value="ensemble">集成模型</option>
+                                        <option value="random_forest">隨機森林</option>
+                                        <option value="xgboost">XGBoost</option>
+                                        <option value="lightgbm">LightGBM</option>
+                                        <option value="catboost">CatBoost</option>
+                                        <option value="neural_network">神經網絡</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="numSets" class="form-label">生成組數</label>
+                                    <input type="number" id="numSets" class="form-control" min="1" max="10" value="5">
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <button id="generatePredictBtn" class="btn btn-success">生成預測</button>
+                                    <button id="generateWithBestParams" class="btn btn-info">使用最佳參數預測</button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
-            </div>
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header">號碼頻率分布</div>
-                    <div class="card-body">
-                        <canvas id="frequencyChart"></canvas>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 添加實際開獎號碼輸入區域 -->
-        <div class="row mt-4">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header">實際開獎號碼</div>
-                    <div class="card-body">
-                        <div class="input-group">
-                            <input type="text" class="form-control" id="actualNumbers" placeholder="輸入逗號分隔的實際開獎號碼，例如: 1,2,3,4,5,6">
-                            <button class="btn btn-outline-secondary" type="button" id="setActualNumbers">設置</button>
+                
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>預測結果</h5>
+                            </div>
+                            <div class="card-body">
+                                <div id="predictions" class="row"></div>
+                            </div>
                         </div>
-                        <div class="form-text">設置實際開獎號碼後，可以評估預測結果的準確性。</div>
                     </div>
                 </div>
+                
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>評估預測</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label class="form-label">實際開獎號碼</label>
+                                    <div class="input-group">
+                                        <input type="number" id="actualNum1" class="form-control" min="1" max="49" placeholder="號碼1">
+                                        <input type="number" id="actualNum2" class="form-control" min="1" max="49" placeholder="號碼2">
+                                        <input type="number" id="actualNum3" class="form-control" min="1" max="49" placeholder="號碼3">
+                                        <input type="number" id="actualNum4" class="form-control" min="1" max="49" placeholder="號碼4">
+                                        <input type="number" id="actualNum5" class="form-control" min="1" max="49" placeholder="號碼5">
+                                    </div>
+                                </div>
+                                <button id="evaluateBtn" class="btn btn-info">評估預測</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>優化參數</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-group">
+                                    <label for="model_name">模型類型</label>
+                                    <select class="form-control" id="model_name" name="model_name">
+                                        <option value="random_forest">Random Forest</option>
+                                        <option value="xgboost">XGBoost</option>
+                                        <option value="lightgbm">LightGBM</option>
+                                        <option value="catboost">CatBoost</option>
+                                        <option value="neural_network">Neural Network</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="n_trials">試驗次數</label>
+                                    <input type="number" class="form-control" id="n_trials" name="n_trials" value="10" min="1" max="100">
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <button id="startOptimizeBtn" class="btn btn-warning">尋找最佳參數</button>
+                                    <button id="stopOptimizeBtn" class="btn btn-danger" disabled>終止優化</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 評估結果區域 -->
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">評估結果</div>
+                            <div class="card-body">
+                                <div id="evaluationResults">
+                                    <p class="text-muted">點擊「評估預測」按鈕查看評估結果。</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">優化進度</div>
+                            <div class="card-body">
+                                <div id="optimizationProgress"></div>
+                                <div id="optimizationResults">
+                                    <p class="text-muted">點擊「優化參數」按鈕開始參數優化。</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 高級分析結果區域 -->
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">高級數據分析</div>
+                            <div class="card-body">
+                                <div id="analysisResults">
+                                    <p class="text-muted">點擊「高級分析」按鈕查看詳細分析結果。</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 號碼頻率分布 -->
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">號碼頻率分布</div>
+                            <div class="card-body">
+                                <canvas id="frequencyChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 實際開獎號碼輸入區域 -->
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">實際開獎號碼</div>
+                            <div class="card-body">
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="actualNumbers" placeholder="輸入逗號分隔的實際開獎號碼，例如: 1,2,3,4,5,6">
+                                    <button class="btn btn-outline-secondary" type="button" id="setActualNumbers">設置</button>
+                                </div>
+                                <div class="form-text">設置實際開獎號碼後，可以評估預測結果的準確性。</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 提示訊息容器 -->
+                <div id="alertContainer" class="mt-3"></div>
             </div>
         </div>
-
-        <!-- 添加提示訊息容器 -->
-        <div id="alertContainer" class="mt-3"></div>
     </div>
    
+    <!-- 多樣性設置模態框 -->
+    <div class="modal fade" id="diversityModal" tabindex="-1" aria-labelledby="diversityModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="diversityModalLabel">多樣性設置</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="diversityMethod" class="form-label">多樣性方法</label>
+                        <select class="form-select" id="diversityMethod">
+                            <option value="mutation">變異法</option>
+                            <option value="clustering">聚類法</option>
+                            <option value="hybrid" selected>混合法</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="diversityLevel" class="form-label">多樣性程度 (0-1)</label>
+                        <input type="range" class="form-range" min="0" max="1" step="0.1" id="diversityLevel" value="0.2">
+                        <div class="d-flex justify-content-between">
+                            <span>低</span>
+                            <span>中</span>
+                            <span>高</span>
+                        </div>
+                    </div>
+                    <div class="alert alert-info">
+                        <small>多樣性程度越高，預測結果差異越大，但可能降低準確性。</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="saveDiversitySettings">保存設置</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 優化設置模態框 -->
+    <div class="modal fade" id="optimizeModal" tabindex="-1" aria-labelledby="optimizeModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="optimizeModalLabel">參數優化設置</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="optimizeTrials" class="form-label">優化試驗次數</label>
+                        <input type="number" class="form-control" id="optimizeTrials" value="100" min="10" max="1000">
+                        <div class="form-text">試驗次數越多，找到最佳參數的機會越大，但耗時也越長。</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="optimizeActualNumbers" class="form-label">實際開獎號碼</label>
+                        <input type="text" class="form-control" id="optimizeActualNumbers" placeholder="例如: 1,2,3,4,5,6">
+                        <div class="form-text">輸入逗號分隔的實際開獎號碼，用於評估優化效果。</div>
+                    </div>
+                    <div class="alert alert-warning">
+                        <small>參數優化可能需要較長時間，請耐心等待。</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="startOptimization">開始優化</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 訓練進度模態框 -->
+    <div class="modal fade" id="trainingProgressModal" tabindex="-1" aria-labelledby="trainingProgressModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="trainingProgressModalLabel">模型訓練進度</h5>
+                </div>
+                <div class="modal-body">
+                    <div class="progress mb-3">
+                        <div id="trainingProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                    <div id="trainingProgressText">準備訓練...</div>
+                    <div id="trainingCurrentModel" class="mt-2 text-muted"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-danger" id="cancelTrainingBtn">終止訓練</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>

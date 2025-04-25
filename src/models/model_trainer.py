@@ -8,11 +8,13 @@ import xgboost as xgb
 import lightgbm as lgb
 from catboost import CatBoostRegressor
 import tensorflow as tf
-from tensorflow.keras.models import Sequential, load_model, Model
-from tensorflow.keras.layers import Dense, LSTM, Dropout, Input
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
-from tensorflow.keras.optimizers import Adam
+import keras
+from keras.models import Sequential, load_model, Model
+from keras.layers import Dense, LSTM, Dropout, Input
+from keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras.optimizers import Adam
 import optuna
+from optuna.samplers import TPESampler
 import joblib
 import os
 import random
@@ -22,8 +24,9 @@ from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
 import matplotlib
 from datetime import datetime
 import json
-
-matplotlib.use('Agg')  # 使用非交互式後端，避免 Tkinter 問題
+# 設置 Keras 後端為 TensorFlow
+os.environ["KERAS_BACKEND"] = "tensorflow"
+matplotlib.use('Agg')  # 使用非互動式後端，避免 Tkinter 問題
 
 class LotteryModelTrainer:
     def __init__(self, X, y, model_dir='models'):
@@ -34,6 +37,7 @@ class LotteryModelTrainer:
         self.ensemble_model = None
         self.feature_names = X.columns.tolist() if isinstance(X, pd.DataFrame) else None
         self.best_params = {}
+        self.should_stop = False  # 新增終止標誌
         
         # 確保模型目錄存在
         if not os.path.exists(model_dir):
@@ -49,11 +53,14 @@ class LotteryModelTrainer:
     def train_random_forest(self, optimize=True):
         """訓練隨機森林模型"""
         if optimize:
-            # 使用Optuna優化超參數
-            study = optuna.create_study(direction='minimize')
+            # 使用Optuna最佳化超引數
+            study = optuna.create_study(
+                direction='minimize',
+                sampler=TPESampler(n_startup_trials=10)
+            )
             study.optimize(self._objective_rf, n_trials=50)
             
-            # 使用最佳參數訓練模型
+            # 使用最佳引數訓練模型
             best_params = study.best_params
             self.best_params['random_forest'] = best_params
             model = RandomForestRegressor(
@@ -69,7 +76,7 @@ class LotteryModelTrainer:
         model.fit(self.X_train, self.y_train)
         self.models['random_forest'] = model
         
-        # 保存模型
+        # 儲存模型
         joblib.dump(model, os.path.join(self.model_dir, 'random_forest_model.pkl'))
         
         return model
@@ -77,11 +84,14 @@ class LotteryModelTrainer:
     def train_xgboost(self, optimize=True):
         """訓練XGBoost模型"""
         if optimize:
-            # 使用Optuna優化超參數
-            study = optuna.create_study(direction='minimize')
+            # 使用Optuna最佳化超引數
+            study = optuna.create_study(
+                direction='minimize',
+                sampler=TPESampler(n_startup_trials=10)
+            )
             study.optimize(self._objective_xgb, n_trials=50)
             
-            # 使用最佳參數訓練模型
+            # 使用最佳引數訓練模型
             best_params = study.best_params
             self.best_params['xgboost'] = best_params
             model = xgb.XGBRegressor(
@@ -98,12 +108,16 @@ class LotteryModelTrainer:
         # 對每個目標列單獨訓練模型
         models = {}
         for i, col in enumerate(self.y_train.columns):
+            # 檢查是否應該終止
+            if self.should_stop:
+                break
+                
             model_i = model.fit(self.X_train, self.y_train.iloc[:, i])
             models[col] = model_i
         
         self.models['xgboost'] = models
         
-        # 保存模型
+        # 儲存模型
         joblib.dump(models, os.path.join(self.model_dir, 'xgboost_model.pkl'))
         
         return models
@@ -111,11 +125,14 @@ class LotteryModelTrainer:
     def train_lightgbm(self, optimize=True):
         """訓練LightGBM模型"""
         if optimize:
-            # 使用Optuna優化超參數
-            study = optuna.create_study(direction='minimize')
+            # 使用Optuna最佳化超引數
+            study = optuna.create_study(
+                direction='minimize',
+                sampler=TPESampler(n_startup_trials=10)
+            )
             study.optimize(self._objective_lgb, n_trials=50)
             
-            # 使用最佳參數訓練模型
+            # 使用最佳引數訓練模型
             best_params = study.best_params
             self.best_params['lightgbm'] = best_params
             model = lgb.LGBMRegressor(
@@ -132,12 +149,16 @@ class LotteryModelTrainer:
         # 對每個目標列單獨訓練模型
         models = {}
         for i, col in enumerate(self.y_train.columns):
+            # 檢查是否應該終止
+            if self.should_stop:
+                break
+                
             model_i = model.fit(self.X_train, self.y_train.iloc[:, i])
             models[col] = model_i
         
         self.models['lightgbm'] = models
         
-        # 保存模型
+        # 儲存模型
         joblib.dump(models, os.path.join(self.model_dir, 'lightgbm_model.pkl'))
         
         return models
@@ -145,11 +166,14 @@ class LotteryModelTrainer:
     def train_catboost(self, optimize=True):
         """訓練CatBoost模型"""
         if optimize:
-            # 使用Optuna優化超參數
-            study = optuna.create_study(direction='minimize')
+            # 使用Optuna最佳化超引數
+            study = optuna.create_study(
+                direction='minimize',
+                sampler=TPESampler(n_startup_trials=10)
+            )
             study.optimize(self._objective_catboost, n_trials=30)
             
-            # 使用最佳參數訓練模型
+            # 使用最佳引數訓練模型
             best_params = study.best_params
             self.best_params['catboost'] = best_params
             model = CatBoostRegressor(
@@ -167,12 +191,16 @@ class LotteryModelTrainer:
         # 對每個目標列單獨訓練模型
         models = {}
         for i, col in enumerate(self.y_train.columns):
+            # 檢查是否應該終止
+            if self.should_stop:
+                break
+                
             model_i = model.fit(self.X_train, self.y_train.iloc[:, i])
             models[col] = model_i
         
         self.models['catboost'] = models
         
-        # 保存模型
+        # 儲存模型
         joblib.dump(models, os.path.join(self.model_dir, 'catboost_model.pkl'))
         
         return models
@@ -180,11 +208,14 @@ class LotteryModelTrainer:
     def train_neural_network(self, optimize=True):
         """訓練深度學習模型"""
         if optimize:
-            # 使用Optuna優化超參數
-            study = optuna.create_study(direction='minimize')
+            # 使用Optuna最佳化超引數
+            study = optuna.create_study(
+                direction='minimize',
+                sampler=optuna.samplers.TPESampler(n_startup_trials=10)
+            )
             study.optimize(self._objective_nn, n_trials=30)
             
-            # 使用最佳參數訓練模型
+            # 使用最佳引數訓練模型
             best_params = study.best_params
             self.best_params['neural_network'] = best_params
             models = self._build_nn_models(
@@ -198,9 +229,10 @@ class LotteryModelTrainer:
         
         self.models['neural_network'] = models
         
-        # 保存模型
+        # 儲存模型
         for i, col in enumerate(self.y_train.columns):
-            models[col].save(os.path.join(self.model_dir, f'nn_model_{col}.h5'))
+            # 使用 .keras 格式儲存模型，這是 Keras 3 推薦的格式
+            models[col].save(os.path.join(self.model_dir, f'nn_model_{col}.keras'))
         
         return models
     
@@ -209,22 +241,28 @@ class LotteryModelTrainer:
         models = {}
         
         for i, col in enumerate(self.y_train.columns):
-            model = Sequential()
-            
-            # 輸入層
-            model.add(Dense(neurons, activation='relu', input_shape=(self.X_train.shape[1],)))
-            model.add(Dropout(dropout))
+            # 檢查是否應該終止
+            if hasattr(self, 'should_stop') and self.should_stop:
+                break
+                
+            # 使用函數式 API 創建模型
+            inputs = keras.Input(shape=(self.X_train.shape[1],))
+            x = Dense(neurons, activation='relu')(inputs)
+            x = Dropout(dropout)(x)
             
             # 隱藏層
             for _ in range(hidden_layers):
-                model.add(Dense(neurons, activation='relu'))
-                model.add(Dropout(dropout))
+                x = Dense(neurons, activation='relu')(x)
+                x = Dropout(dropout)(x)
             
             # 輸出層
-            model.add(Dense(1))
+            outputs = Dense(1)(x)
+            
+            # 創建模型
+            model = keras.Model(inputs=inputs, outputs=outputs)
             
             # 編譯模型
-            optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+            optimizer = keras.optimizers.Adam(learning_rate=learning_rate)
             model.compile(loss='mse', optimizer=optimizer)
             
             # 訓練模型
@@ -243,33 +281,37 @@ class LotteryModelTrainer:
         return models
     
     def train_ensemble(self):
-        """訓練集成模型"""
+        """訓練整合模型"""
         # 確保已經訓練了基礎模型
         if not self.models:
             self.train_random_forest()
             self.train_xgboost()
             self.train_lightgbm()
         
-        # 對每個目標列創建集成模型
+        # 對每個目標列建立整合模型
         ensemble_models = {}
         
         for i, col in enumerate(self.y_train.columns):
+            # 檢查是否應該終止
+            if self.should_stop:
+                break
+                
             # 準備基礎模型
             base_models = []
             
-            # 添加XGBoost模型
+            # 新增XGBoost模型
             if 'xgboost' in self.models:
                 base_models.append(('xgboost', self.models['xgboost'][col]))
             
-            # 添加LightGBM模型
+            # 新增LightGBM模型
             if 'lightgbm' in self.models:
                 base_models.append(('lightgbm', self.models['lightgbm'][col]))
             
-            # 添加CatBoost模型
+            # 新增CatBoost模型
             if 'catboost' in self.models:
                 base_models.append(('catboost', self.models['catboost'][col]))
             
-            # 創建集成模型
+            # 建立整合模型
             ensemble = VotingRegressor(base_models)
             ensemble.fit(self.X_train, self.y_train.iloc[:, i])
             
@@ -277,13 +319,35 @@ class LotteryModelTrainer:
         
         self.ensemble_model = ensemble_models
         
-        # 保存模型
+        # 儲存模型
         joblib.dump(ensemble_models, os.path.join(self.model_dir, 'ensemble_model.pkl'))
         
         return ensemble_models
     
+    def train_all_models(self, optimize=True):
+        """訓練所有模型"""
+        # 檢查是否已經分割了資料
+        if not hasattr(self, 'X_train') or self.X_train is None:
+            self.train_test_split()
+        
+        # 訓練各個模型
+        if not self.should_stop:
+            self.train_random_forest(optimize)
+        if not self.should_stop:
+            self.train_xgboost(optimize)
+        if not self.should_stop:
+            self.train_lightgbm(optimize)
+        if not self.should_stop:
+            self.train_catboost(optimize)
+        if not self.should_stop:
+            self.train_neural_network(optimize)
+        if not self.should_stop:
+            self.train_ensemble()
+        
+        return self.models
+    
     def evaluate_model(self, model_name, X=None, y=None):
-        """評估模型性能"""
+        """評估模型效能"""
         if X is None:
             X = self.X_test
         if y is None:
@@ -308,15 +372,36 @@ class LotteryModelTrainer:
                 y_pred = models.predict(X)[:, i]
             
             # 計算評估指標
-            mse = mean_squared_error(y.iloc[:, i], y_pred)
-            mae = mean_absolute_error(y.iloc[:, i], y_pred)
-            r2 = r2_score(y.iloc[:, i], y_pred)
-            
-            results[col] = {
-                'mse': mse,
-                'mae': mae,
-                'r2': r2
-            }
+                mse = mean_squared_error(y.iloc[:, i], y_pred)
+                mae = mean_absolute_error(y.iloc[:, i], y_pred)
+                r2 = r2_score(y.iloc[:, i], y_pred)
+                
+                results[col] = {
+                    'mse': mse,
+                    'mae': mae,
+                    'r2': r2
+                }
+        
+        return results
+    
+    def evaluate_all_models(self, X=None, y=None):
+        """評估所有模型"""
+        if X is None:
+            X = self.X_test
+        if y is None:
+            y = self.y_test
+        
+        results = {}
+        
+        # 評估各個模型
+        for model_name in self.models.keys():
+            if self.should_stop:
+                break
+            results[model_name] = self.evaluate_model(model_name, X, y)
+        
+        # 評估整合模型
+        if self.ensemble_model and not self.should_stop:
+            results['ensemble'] = self.evaluate_model('ensemble', X, y)
         
         return results
     
@@ -329,6 +414,9 @@ class LotteryModelTrainer:
         
         # 對每個目標列進行交叉驗證
         for i, col in enumerate(self.y.columns):
+            if self.should_stop:
+                break
+                
             if model_name == 'random_forest':
                 model = RandomForestRegressor(random_state=42)
             elif model_name == 'xgboost':
@@ -359,6 +447,24 @@ class LotteryModelTrainer:
     
     def generate_lottery_numbers(self, X_new, model_name='ensemble', num_sets=5):
         """生成彩票號碼預測"""
+        # 確保 X_new 是正確的格式
+        if not isinstance(X_new, pd.DataFrame) and self.feature_names:
+            # 如果不是 DataFrame 但我們有特徵名稱，則轉換為 DataFrame
+            X_new = pd.DataFrame([X_new] if np.array(X_new).ndim == 1 else X_new, 
+                                columns=self.feature_names)
+        elif isinstance(X_new, pd.DataFrame):
+            # 如果是 DataFrame，確保列名與特徵名稱一致
+            if self.feature_names and list(X_new.columns) != self.feature_names:
+                X_new = pd.DataFrame(X_new.values, columns=self.feature_names)
+        
+        # 檢查並處理 NaN 值
+        if isinstance(X_new, pd.DataFrame) and X_new.isna().any().any():
+            print(f"警告: X_new 包含 NaN 值，將使用 0 填充")
+            X_new = X_new.fillna(0)
+        elif not isinstance(X_new, pd.DataFrame) and np.isnan(np.array(X_new)).any():
+            print(f"警告: X_new 包含 NaN 值，將使用 0 填充")
+            X_new = np.nan_to_num(X_new)
+        
         if model_name == 'ensemble' and self.ensemble_model:
             models = self.ensemble_model
         elif model_name in self.models:
@@ -396,14 +502,18 @@ class LotteryModelTrainer:
         return predictions
     
     def _objective_rf(self, trial):
-        """隨機森林模型的目標函數"""
-        # 定義超參數空間
+        """隨機森林模型的目標函式"""
+        # 檢查是否應該終止
+        if self.should_stop:
+            raise optuna.exceptions.TrialPruned("訓練被使用者終止")
+            
+        # 定義超引數空間
         n_estimators = trial.suggest_int('n_estimators', 100, 500)
         max_depth = trial.suggest_int('max_depth', 3, 10)
         min_samples_split = trial.suggest_int('min_samples_split', 2, 20)
         min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 10)
         
-        # 創建模型
+        # 建立模型
         model = RandomForestRegressor(
             n_estimators=n_estimators,
             max_depth=max_depth,
@@ -431,15 +541,19 @@ class LotteryModelTrainer:
         return np.mean(scores)
     
     def _objective_xgb(self, trial):
-        """XGBoost模型的目標函數"""
-        # 定義超參數空間
+        """XGBoost模型的目標函式"""
+        # 檢查是否應該終止
+        if self.should_stop:
+            raise optuna.exceptions.TrialPruned("訓練被使用者終止")
+            
+        # 定義超引數空間
         n_estimators = trial.suggest_int('n_estimators', 100, 500)
         max_depth = trial.suggest_int('max_depth', 3, 10)
         learning_rate = trial.suggest_float('learning_rate', 0.01, 0.3, log=True)
         subsample = trial.suggest_float('subsample', 0.6, 1.0)
         colsample_bytree = trial.suggest_float('colsample_bytree', 0.6, 1.0)
         
-        # 創建模型
+        # 建立模型
         model = xgb.XGBRegressor(
             n_estimators=n_estimators,
             max_depth=max_depth,
@@ -472,15 +586,19 @@ class LotteryModelTrainer:
         return np.mean(scores)
     
     def _objective_lgb(self, trial):
-        """LightGBM模型的目標函數"""
-        # 定義超參數空間
+        """LightGBM模型的目標函式"""
+        # 檢查是否應該終止
+        if self.should_stop:
+            raise optuna.exceptions.TrialPruned("訓練被使用者終止")
+            
+        # 定義超引數空間
         n_estimators = trial.suggest_int('n_estimators', 100, 500)
         max_depth = trial.suggest_int('max_depth', 3, 10)
         learning_rate = trial.suggest_float('learning_rate', 0.01, 0.3, log=True)
         subsample = trial.suggest_float('subsample', 0.6, 1.0)
         colsample_bytree = trial.suggest_float('colsample_bytree', 0.6, 1.0)
         
-        # 創建模型
+        # 建立模型
         model = lgb.LGBMRegressor(
             n_estimators=n_estimators,
             max_depth=max_depth,
@@ -513,15 +631,19 @@ class LotteryModelTrainer:
         return np.mean(scores)
     
     def _objective_catboost(self, trial):
-        """CatBoost模型的目標函數"""
-        # 定義超參數空間
+        """CatBoost模型的目標函式"""
+        # 檢查是否應該終止
+        if self.should_stop:
+            raise optuna.exceptions.TrialPruned("訓練被使用者終止")
+            
+        # 定義超引數空間
         iterations = trial.suggest_int('iterations', 100, 500)
         depth = trial.suggest_int('depth', 4, 10)
         learning_rate = trial.suggest_float('learning_rate', 0.01, 0.3, log=True)
         random_strength = trial.suggest_float('random_strength', 1e-9, 10, log=True)
         bagging_temperature = trial.suggest_float('bagging_temperature', 0, 10)
         
-        # 創建模型
+        # 建立模型
         model = CatBoostRegressor(
             iterations=iterations,
             depth=depth,
@@ -555,8 +677,12 @@ class LotteryModelTrainer:
         return np.mean(scores)
     
     def _objective_nn(self, trial):
-        """神經網絡模型的目標函數"""
-        # 定義超參數空間
+        """神經網路模型的目標函式"""
+        # 檢查是否應該終止
+        if hasattr(self, 'should_stop') and self.should_stop:
+            raise optuna.exceptions.TrialPruned("訓練被使用者終止")
+            
+        # 定義超引數空間
         hidden_layers = trial.suggest_int('hidden_layers', 1, 3)
         neurons = trial.suggest_categorical('neurons', [32, 64, 128])
         dropout = trial.suggest_float('dropout', 0.1, 0.5)
@@ -573,19 +699,24 @@ class LotteryModelTrainer:
             # 對每個目標列單獨訓練模型
             mse_fold = 0
             for i in range(y_train_fold.shape[1]):
-                # 創建模型
-                model = Sequential()
-                model.add(Dense(neurons, activation='relu', input_shape=(X_train_fold.shape[1],)))
-                model.add(Dropout(dropout))
+                # 使用函數式 API 建立模型
+                inputs = keras.Input(shape=(X_train_fold.shape[1],))
+                x = Dense(neurons, activation='relu')(inputs)
+                x = Dropout(dropout)(x)
                 
+                # 隱藏層
                 for _ in range(hidden_layers):
-                    model.add(Dense(neurons, activation='relu'))
-                    model.add(Dropout(dropout))
+                    x = Dense(neurons, activation='relu')(x)
+                    x = Dropout(dropout)(x)
                 
-                model.add(Dense(1))
+                # 輸出層
+                outputs = Dense(1)(x)
+                
+                # 創建模型
+                model = keras.Model(inputs=inputs, outputs=outputs)
                 
                 # 編譯模型
-                optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+                optimizer = keras.optimizers.Adam(learning_rate=learning_rate)
                 model.compile(loss='mse', optimizer=optimizer)
                 
                 # 訓練模型
@@ -611,98 +742,52 @@ class LotteryModelTrainer:
         return np.mean(scores)
     
     def optimize_hyperparameters(self, model_name='random_forest', n_trials=50):
-        """優化超參數"""
-        print(f"開始優化 {model_name} 模型的超參數...")
+        """最佳化超引數"""
+        print(f"開始最佳化 {model_name} 模型的超引數...")
         
+        # 建立study
+        study = optuna.create_study(
+            direction='minimize',
+            sampler=TPESampler(n_startup_trials=10)
+        )
+        
+        # 根據模型型別選擇目標函式
         if model_name == 'random_forest':
-            study = optuna.create_study(direction='minimize')
-            study.optimize(self._objective_rf, n_trials=n_trials)
-            best_params = study.best_params
-            best_score = study.best_value
-            
-            print(f"最佳參數: {best_params}")
-            print(f"最佳MSE: {best_score}")
-            
-            # 保存最佳參數
-            params_path = os.path.join(self.model_dir, 'random_forest_best_params.json')
-            with open(params_path, 'w') as f:
-                json.dump(best_params, f)
-            print(f"最佳參數已保存到: {params_path}")
-            
-            return best_params, best_score, 'random_forest'
-            
+            objective = self._objective_rf
         elif model_name == 'xgboost':
-            study = optuna.create_study(direction='minimize')
-            study.optimize(self._objective_xgb, n_trials=n_trials)
-            best_params = study.best_params
-            best_score = study.best_value
-            
-            print(f"最佳參數: {best_params}")
-            print(f"最佳MSE: {best_score}")
-            
-            # 保存最佳參數
-            params_path = os.path.join(self.model_dir, 'xgboost_best_params.json')
-            with open(params_path, 'w') as f:
-                json.dump(best_params, f)
-            print(f"最佳參數已保存到: {params_path}")
-            
-            return best_params, best_score, 'xgboost'
-            
+            objective = self._objective_xgb
         elif model_name == 'lightgbm':
-            study = optuna.create_study(direction='minimize')
-            study.optimize(self._objective_lgb, n_trials=n_trials)
-            best_params = study.best_params
-            best_score = study.best_value
-            print(f"最佳參數: {best_params}")
-            print(f"最佳MSE: {best_score}")
-            
-            # 保存最佳參數
-            params_path = os.path.join(self.model_dir, 'lightgbm_best_params.json')
-            with open(params_path, 'w') as f:
-                json.dump(best_params, f)
-            print(f"最佳參數已保存到: {params_path}")
-            
-            return best_params, best_score, 'lightgbm'
-            
+            objective = self._objective_lgb
         elif model_name == 'catboost':
-            study = optuna.create_study(direction='minimize')
-            study.optimize(self._objective_catboost, n_trials=n_trials)
-            best_params = study.best_params
-            best_score = study.best_value
-            
-            print(f"最佳參數: {best_params}")
-            print(f"最佳MSE: {best_score}")
-            
-            # 保存最佳參數
-            params_path = os.path.join(self.model_dir, 'catboost_best_params.json')
-            with open(params_path, 'w') as f:
-                json.dump(best_params, f)
-            print(f"最佳參數已保存到: {params_path}")
-            
-            return best_params, best_score, 'catboost'
-            
+            objective = self._objective_catboost
         elif model_name == 'neural_network':
-            study = optuna.create_study(direction='minimize')
-            study.optimize(self._objective_nn, n_trials=n_trials)
-            best_params = study.best_params
-            best_score = study.best_value
-            
-            print(f"最佳參數: {best_params}")
-            print(f"最佳MSE: {best_score}")
-            
-            # 保存最佳參數
-            params_path = os.path.join(self.model_dir, 'neural_network_best_params.json')
-            with open(params_path, 'w') as f:
-                json.dump(best_params, f)
-            print(f"最佳參數已保存到: {params_path}")
-            
-            return best_params, best_score, 'neural_network'
-            
+            objective = self._objective_nn
         else:
-            raise ValueError(f"不支持的模型: {model_name}")
+            raise ValueError(f"不支援的模型: {model_name}")
+        
+        # 重置終止標誌
+        self.should_stop = False
+        
+        # 執行最佳化
+        study.optimize(objective, n_trials=n_trials)
+        
+        # 獲取最佳引數
+        best_params = study.best_params
+        best_score = study.best_value
+        
+        print(f"最佳引數: {best_params}")
+        print(f"最佳MSE: {best_score}")
+        
+        # 儲存最佳引數
+        params_path = os.path.join(self.model_dir, f'{model_name}_best_params.json')
+        with open(params_path, 'w') as f:
+            json.dump(best_params, f)
+        print(f"最佳引數已儲存到: {params_path}")
+        
+        return best_params, best_score, model_name
     
     def save_optimal_parameters(self, model_name, params, hit_rate):
-        """保存最佳參數"""
+        """儲存最佳引數"""
         optimal_params = {
             'model_name': model_name,
             'parameters': params,
@@ -716,7 +801,7 @@ class LotteryModelTrainer:
         return params_path
     
     def load_optimal_parameters(self):
-        """載入最佳參數"""
+        """載入最佳引數"""
         params_path = os.path.join(self.model_dir, 'optimal_parameters.json')
         if os.path.exists(params_path):
             with open(params_path, 'r') as f:
@@ -727,11 +812,11 @@ class LotteryModelTrainer:
             return None
     
     def train_model_with_params(self, model_name, params):
-        """使用指定參數訓練模型
+        """使用指定引數訓練模型
         
-        參數:
+        引數:
             model_name: 模型名稱 ('random_forest', 'xgboost', 'lightgbm', 'catboost', 'neural_network')
-            params: 模型參數字典
+            params: 模型引數字典
         
         返回:
             訓練好的模型
@@ -741,7 +826,7 @@ class LotteryModelTrainer:
             model.fit(self.X_train, self.y_train)
             self.models['random_forest'] = model
             
-            # 保存模型
+            # 儲存模型
             model_path = os.path.join(self.model_dir, 'random_forest_model.pkl')
             joblib.dump(model, model_path)
             
@@ -751,13 +836,15 @@ class LotteryModelTrainer:
             # 對每個目標列單獨訓練模型
             models = {}
             for i, col in enumerate(self.y_train.columns):
+                if hasattr(self, 'should_stop') and self.should_stop:
+                    break
                 model = xgb.XGBRegressor(**params, random_state=42, n_jobs=-1)
                 model.fit(self.X_train, self.y_train.iloc[:, i])
                 models[col] = model
             
             self.models['xgboost'] = models
             
-            # 保存模型
+            # 儲存模型
             model_path = os.path.join(self.model_dir, 'xgboost_model.pkl')
             joblib.dump(models, model_path)
             
@@ -767,13 +854,15 @@ class LotteryModelTrainer:
             # 對每個目標列單獨訓練模型
             models = {}
             for i, col in enumerate(self.y_train.columns):
+                if hasattr(self, 'should_stop') and self.should_stop:
+                    break
                 model = lgb.LGBMRegressor(**params, random_state=42, n_jobs=-1)
                 model.fit(self.X_train, self.y_train.iloc[:, i])
                 models[col] = model
             
             self.models['lightgbm'] = models
             
-            # 保存模型
+            # 儲存模型
             model_path = os.path.join(self.model_dir, 'lightgbm_model.pkl')
             joblib.dump(models, model_path)
             
@@ -783,23 +872,25 @@ class LotteryModelTrainer:
             # 對每個目標列單獨訓練模型
             models = {}
             for i, col in enumerate(self.y_train.columns):
+                if hasattr(self, 'should_stop') and self.should_stop:
+                    break
                 model = CatBoostRegressor(**params, random_seed=42, thread_count=-1, verbose=0)
                 model.fit(self.X_train, self.y_train.iloc[:, i])
                 models[col] = model
             
             self.models['catboost'] = models
             
-            # 保存模型
+            # 儲存模型
             model_path = os.path.join(self.model_dir, 'catboost_model.pkl')
             joblib.dump(models, model_path)
             
             return models
             
         elif model_name == 'neural_network':
-            # 神經網絡模型需要特殊處理
+            # 神經網路模型需要特殊處理
             input_dim = self.X_train.shape[1]
             
-            # 從參數中獲取神經網絡配置
+            # 從引數中獲取神經網路配置
             hidden_layers = params.get('hidden_layers', 2)
             neurons = params.get('neurons', 64)
             dropout = params.get('dropout', 0.2)
@@ -808,19 +899,27 @@ class LotteryModelTrainer:
             # 對每個目標列單獨訓練模型
             models = {}
             for i, col in enumerate(self.y_train.columns):
-                # 創建模型
-                model = Sequential()
-                model.add(Dense(neurons, activation='relu', input_shape=(input_dim,)))
-                model.add(Dropout(dropout))
+                if hasattr(self, 'should_stop') and self.should_stop:
+                    break
+                    
+                # 使用函數式 API 建立模型
+                inputs = keras.Input(shape=(input_dim,))
+                x = Dense(neurons, activation='relu')(inputs)
+                x = Dropout(dropout)(x)
                 
+                # 隱藏層
                 for _ in range(hidden_layers):
-                    model.add(Dense(neurons, activation='relu'))
-                    model.add(Dropout(dropout))
+                    x = Dense(neurons, activation='relu')(x)
+                    x = Dropout(dropout)(x)
                 
-                model.add(Dense(1))
+                # 輸出層
+                outputs = Dense(1)(x)
+                
+                # 創建模型
+                model = keras.Model(inputs=inputs, outputs=outputs)
                 
                 # 編譯模型
-                optimizer = Adam(learning_rate=learning_rate)
+                optimizer = keras.optimizers.Adam(learning_rate=learning_rate)
                 model.compile(loss='mse', optimizer=optimizer)
                 
                 # 訓練模型
@@ -838,12 +937,16 @@ class LotteryModelTrainer:
             
             self.models['neural_network'] = models
             
-            # 保存模型
+            # 儲存模型
             for col, model in models.items():
-                model_path = os.path.join(self.model_dir, f'nn_model_{col}.h5')
+                model_path = os.path.join(self.model_dir, f'nn_model_{col}.keras')
                 model.save(model_path)
             
             return models
             
         else:
-            raise ValueError(f"不支持的模型: {model_name}")
+            raise ValueError(f"不支援的模型: {model_name}")
+    
+    def set_stop_flag(self, value=True):
+        """設定終止標誌"""
+        self.should_stop = value

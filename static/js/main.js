@@ -1,7 +1,17 @@
 $(document).ready(function() {
+    // 初始化頁面
+    loadDataSummary();
+    
     // 訓練模型
-    $('#trainBtn').click(function() {
+    $('#trainBtn, #trainModelBtn').click(function() {
         $('#trainStatus').html('<div class="alert alert-info">正在訓練模型，請稍候...</div>');
+        $('#stopTrainBtn').prop('disabled', false);
+        
+        // 顯示訓練進度模態框
+        $('#trainingProgressBar').css('width', '0%').attr('aria-valuenow', 0);
+        $('#trainingProgressText').text('準備訓練...');
+        $('#trainingCurrentModel').text('');
+        $('#trainingProgressModal').modal('show');
         
         $.ajax({
             url: '/train',
@@ -9,21 +19,100 @@ $(document).ready(function() {
             contentType: 'application/json',
             success: function(response) {
                 $('#trainStatus').html('<div class="alert alert-success">模型訓練成功！</div>');
+                showAlert('模型訓練成功！', 'success');
+                $('#stopTrainBtn').prop('disabled', true);
+                $('#trainingProgressModal').modal('hide');
                 console.log(response);
             },
             error: function(error) {
-                $('#trainStatus').html('<div class="alert alert-danger">模型訓練失敗：' + error.responseJSON.message + '</div>');
+                if (error.status === 499) { // 自定義狀態碼，表示用戶取消
+                    $('#trainStatus').html('<div class="alert alert-warning">模型訓練已取消</div>');
+                    showAlert('模型訓練已取消', 'warning');
+                } else {
+                    $('#trainStatus').html('<div class="alert alert-danger">模型訓練失敗：' + error.responseJSON.message + '</div>');
+                    showAlert('模型訓練失敗：' + error.responseJSON.message, 'danger');
+                }
+                $('#stopTrainBtn').prop('disabled', true);
+                $('#trainingProgressModal').modal('hide');
                 console.error(error);
             }
         });
+        
+        // 定期檢查訓練進度
+        checkTrainingProgress();
+    });
+    
+    // 終止訓練
+    $('#stopTrainBtn, #cancelTrainingBtn').click(function() {
+        if (confirm('確定要終止當前訓練過程嗎？')) {
+            $.ajax({
+                url: '/stop_training',
+                method: 'POST',
+                contentType: 'application/json',
+                success: function(response) {
+                    showAlert('已發送終止訓練請求，請等待當前步驟完成...', 'warning');
+                },
+                error: function(error) {
+                    showAlert('終止訓練請求失敗：' + error.responseJSON.message, 'danger');
+                    console.error(error);
+                }
+            });
+        }
+    });
+    
+    // 高級訓練模型
+    $('#advancedTrainBtn').click(function() {
+        const epochs = parseInt($('#epochsSelect').val());
+        const batchSize = parseInt($('#batchSizeSelect').val());
+        
+        $('#trainStatus').html('<div class="alert alert-info">正在進行高級訓練，請稍候...</div>');
+        $('#stopTrainBtn').prop('disabled', false);
+        
+        // 顯示訓練進度模態框
+        $('#trainingProgressBar').css('width', '0%').attr('aria-valuenow', 0);
+        $('#trainingProgressText').text('準備高級訓練...');
+        $('#trainingCurrentModel').text('');
+        $('#trainingProgressModal').modal('show');
+        
+        $.ajax({
+            url: '/train_advanced',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                epochs: epochs,
+                batch_size: batchSize
+            }),
+            success: function(response) {
+                $('#trainStatus').html('<div class="alert alert-success">高級模型訓練成功！</div>');
+                showAlert('高級模型訓練成功！', 'success');
+                $('#stopTrainBtn').prop('disabled', true);
+                $('#trainingProgressModal').modal('hide');
+                console.log(response);
+            },
+            error: function(error) {
+                if (error.status === 499) { // 自定義狀態碼，表示用戶取消
+                    $('#trainStatus').html('<div class="alert alert-warning">高級模型訓練已取消</div>');
+                    showAlert('高級模型訓練已取消', 'warning');
+                } else {
+                    $('#trainStatus').html('<div class="alert alert-danger">模型訓練失敗：' + error.responseJSON.message + '</div>');
+                    showAlert('模型訓練失敗：' + error.responseJSON.message, 'danger');
+                }
+                $('#stopTrainBtn').prop('disabled', true);
+                $('#trainingProgressModal').modal('hide');
+                console.error(error);
+            }
+        });
+        
+        // 定期檢查訓練進度
+        checkTrainingProgress();
     });
     
     // 生成預測
-    $('#predictBtn').click(function() {
+    $('#predictBtn, #generatePredictBtn').click(function() {
         const modelName = $('#modelSelect').val();
         const numSets = $('#numSets').val();
         
-        $('#predictions').html('<div class="col-12 text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>');
+        $('#predictions').html('<div class="col-12 text-center"><div class="spinner-border" role="status"><span class="visually-hidden">載入中...</span></div></div>');
         
         $.ajax({
             url: '/predict',
@@ -57,19 +146,22 @@ $(document).ready(function() {
                     setDiv.append(card);
                     $('#predictions').append(setDiv);
                 });
+                
+                showAlert('預測生成成功！', 'success');
             },
             error: function(error) {
                 $('#predictions').html('<div class="col-12"><div class="alert alert-danger">預測失敗：' + error.responseJSON.message + '</div></div>');
+                showAlert('預測失敗：' + error.responseJSON.message, 'danger');
                 console.error(error);
             }
         });
     });
     
     // 使用最佳引數預測
-    $('#predictWithBestParams').click(function() {
+    $('#predictWithBestParams, #generateWithBestParams, #predictWithBestParamsBtn').click(function() {
         const numSets = $('#numSets').val();
         
-        $('#predictions').html('<div class="col-12 text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>');
+        $('#predictions').html('<div class="col-12 text-center"><div class="spinner-border" role="status"><span class="visually-hidden">載入中...</span></div></div>');
         
         $.ajax({
             url: '/predict_with_best_params',
@@ -107,9 +199,12 @@ $(document).ready(function() {
                     setDiv.append(card);
                     $('#predictions').append(setDiv);
                 });
+                
+                showAlert('使用最佳參數預測成功！', 'success');
             },
             error: function(error) {
                 $('#predictions').html('<div class="col-12"><div class="alert alert-danger">預測失敗：' + error.responseJSON.message + '</div></div>');
+                showAlert('預測失敗：' + error.responseJSON.message, 'danger');
                 console.error(error);
             }
         });
@@ -127,6 +222,7 @@ $(document).ready(function() {
         
         if (actualNumbers.length !== 5) {
             $('#evaluationResults').html('<div class="alert alert-danger">請輸入5個有效的號碼（1-49）</div>');
+            showAlert('請輸入5個有效的號碼（1-49）', 'warning');
             return;
         }
         
@@ -146,10 +242,11 @@ $(document).ready(function() {
         
         if (predictions.length === 0) {
             $('#evaluationResults').html('<div class="alert alert-warning">請先生成預測結果</div>');
+            showAlert('請先生成預測結果', 'warning');
             return;
         }
         
-        $('#evaluationResults').html('<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>');
+        $('#evaluationResults').html('<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">載入中...</span></div></div>');
         
         $.ajax({
             url: '/evaluate',
@@ -183,9 +280,11 @@ $(document).ready(function() {
                 html += '</div>';
                 
                 $('#evaluationResults').html(html);
+                showAlert('評估完成！', 'success');
             },
             error: function(error) {
                 $('#evaluationResults').html('<div class="alert alert-danger">評估失敗：' + error.responseJSON.message + '</div>');
+                showAlert('評估失敗：' + error.responseJSON.message, 'danger');
                 console.error(error);
             }
         });
@@ -193,7 +292,7 @@ $(document).ready(function() {
     
     // 最佳化引數
     $('#optimizeBtn').click(function() {
-        const trials = parseInt($('#trials').val());
+        const trials = parseInt($('#trials').val() || 100);
         
         // 獲取實際號碼
         const actualNumbers = [];
@@ -206,10 +305,12 @@ $(document).ready(function() {
         
         if (actualNumbers.length !== 5) {
             $('#evaluationResults').html('<div class="alert alert-danger">請輸入5個有效的號碼（1-49）</div>');
+            showAlert('請輸入5個有效的號碼（1-49）', 'warning');
             return;
         }
         
-        $('#evaluationResults').html('<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>');
+        $('#evaluationResults').html('<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">載入中...</span></div></div>');
+        $('#stopOptimizeBtn').prop('disabled', false);
         
         $.ajax({
             url: '/optimize',
@@ -247,12 +348,39 @@ $(document).ready(function() {
                 html += '</div>';
                 
                 $('#evaluationResults').html(html);
+                $('#stopOptimizeBtn').prop('disabled', true);
+                showAlert('參數優化完成！', 'success');
             },
             error: function(error) {
-                $('#evaluationResults').html('<div class="alert alert-danger">最佳化失敗：' + error.responseJSON.message + '</div>');
+                if (error.status === 499) { // 自定義狀態碼，表示用戶取消
+                    $('#evaluationResults').html('<div class="alert alert-warning">參數優化已取消</div>');
+                    showAlert('參數優化已取消', 'warning');
+                } else {
+                    $('#evaluationResults').html('<div class="alert alert-danger">最佳化失敗：' + error.responseJSON.message + '</div>');
+                    showAlert('最佳化失敗：' + error.responseJSON.message, 'danger');
+                }
+                $('#stopOptimizeBtn').prop('disabled', true);
                 console.error(error);
             }
         });
+    });
+    
+    // 終止優化
+    $('#stopOptimizeBtn').click(function() {
+        if (confirm('確定要終止當前優化過程嗎？')) {
+            $.ajax({
+                url: '/stop_optimization',
+                method: 'POST',
+                contentType: 'application/json',
+                success: function(response) {
+                    showAlert('已發送終止優化請求，請等待當前步驟完成...', 'warning');
+                },
+                error: function(error) {
+                    showAlert('終止優化請求失敗：' + error.responseJSON.message, 'danger');
+                    console.error(error);
+                }
+            });
+        }
     });
     
     // 尋找最佳參數按鈕點擊事件
@@ -261,6 +389,7 @@ $(document).ready(function() {
         const nTrials = parseInt($('#n_trials').val());
         
         $('#optimizationProgress').html('<div class="alert alert-info">正在優化參數，請稍候...</div>');
+        $('#stopOptimizeBtn').prop('disabled', false);
         
         $.ajax({
             url: '/optimize',
@@ -280,84 +409,34 @@ $(document).ready(function() {
                 html += '</div></div>';
                 
                 $('#optimizationResults').html(html);
+                $('#stopOptimizeBtn').prop('disabled', true);
+                showAlert('參數優化完成！', 'success');
             },
             error: function(error) {
-                const errorMsg = error.responseJSON ? error.responseJSON.message : '未知錯誤';
-                $('#optimizationProgress').html(`<div class="alert alert-danger">優化失敗: ${errorMsg}</div>`);
+                if (error.status === 499) { // 自定義狀態碼，表示用戶取消
+                    $('#optimizationProgress').html('<div class="alert alert-warning">參數優化已取消</div>');
+                    showAlert('參數優化已取消', 'warning');
+                } else {
+                    const errorMsg = error.responseJSON ? error.responseJSON.message : '未知錯誤';
+                    $('#optimizationProgress').html(`<div class="alert alert-danger">優化失敗: ${errorMsg}</div>`);
+                    showAlert('優化失敗: ' + errorMsg, 'danger');
+                }
+                $('#stopOptimizeBtn').prop('disabled', true);
             }
         });
+        
+        // 定期檢查優化進度
+        checkOptimizationProgress();
     });
 
     // 載入資料摘要
     $('#dataBtn').click(function() {
-        $('#dataSummary').html('<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>');
-        
-        $.ajax({
-            url: '/data',
-            method: 'GET',
-            success: function(response) {
-                let html = '<div class="row">';
-                
-                // 基本統計資訊
-                html += '<div class="col-md-6"><h6>基本統計資訊</h6>';
-                html += '<p>總記錄數: ' + response.total_records + '</p>';
-                
-                html += '<table class="table table-sm table-striped">';
-                html += '<thead><tr><th>號碼</th><th>最小值</th><th>最大值</th><th>平均值</th><th>中位數</th><th>標準差</th><th>最常見</th></tr></thead>';
-                html += '<tbody>';
-                
-                for (const [col, stats] of Object.entries(response.summary)) {
-                    html += '<tr>';
-                    html += '<td>' + col + '</td>';
-                    html += '<td>' + stats.min + '</td>';
-                    html += '<td>' + stats.max + '</td>';
-                    html += '<td>' + stats.mean.toFixed(2) + '</td>';
-                    html += '<td>' + stats.median + '</td>';
-                    html += '<td>' + stats.std.toFixed(2) + '</td>';
-                    html += '<td>' + stats.most_frequent + '</td>';
-                    html += '</tr>';
-                }
-                
-                html += '</tbody></table></div>';
-                
-                // 最近記錄
-                html += '<div class="col-md-6"><h6>最近記錄</h6>';
-                html += '<table class="table table-sm table-striped">';
-                html += '<thead><tr>';
-                
-                // 獲取列名
-                const firstRecord = response.recent_records[0];
-                for (const key in firstRecord) {
-                    html += '<th>' + key + '</th>';
-                }
-                
-                html += '</tr></thead><tbody>';
-                
-                // 新增記錄
-                response.recent_records.forEach(function(record) {
-                    html += '<tr>';
-                    for (const key in record) {
-                        html += '<td>' + record[key] + '</td>';
-                    }
-                    html += '</tr>';
-                });
-                
-                html += '</tbody></table></div>';
-                
-                html += '</div>';
-                
-                $('#dataSummary').html(html);
-            },
-            error: function(error) {
-                $('#dataSummary').html('<div class="alert alert-danger">載入資料失敗：' + error.responseJSON.message + '</div>');
-                console.error(error);
-            }
-        });
+        loadDataSummary();
     });
     
     // 高級分析功能
     $('#advancedAnalysisBtn').click(function() {
-        $('#analysisResults').html('<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>');
+        $('#analysisResults').html('<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">載入中...</span></div></div>');
         
         $.ajax({
             url: '/advanced_analysis',
@@ -378,6 +457,7 @@ $(document).ready(function() {
                     html += `<li>${item.pair}: ${item.correlation.toFixed(3)}</li>`;
                 });
                 html += '</ul></div></div></div>';
+                
                 // 週期性分析
                 html += '<div class="col-md-6 mb-4"><div class="card"><div class="card-header">號碼週期性分析</div><div class="card-body">';
                 html += '<h6>最強週期性號碼</h6><ul>';
@@ -403,9 +483,11 @@ $(document).ready(function() {
                 html += '</div>'; // 結束 row
                 
                 $('#analysisResults').html(html);
+                showAlert('高級分析完成！', 'success');
             },
             error: function(error) {
                 $('#analysisResults').html(`<div class="alert alert-danger">分析失敗: ${error.responseJSON?.message || '未知錯誤'}</div>`);
+                showAlert('分析失敗: ' + (error.responseJSON?.message || '未知錯誤'), 'danger');
             }
         });
     });
@@ -437,7 +519,7 @@ $(document).ready(function() {
             return;
         }
         
-        $('#evaluationResults').html('<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>');
+        $('#evaluationResults').html('<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">載入中...</span></div></div>');
         
         $.ajax({
             url: '/evaluate',
@@ -473,9 +555,11 @@ $(document).ready(function() {
                 html += '</div></div>';
                 
                 $('#evaluationResults').html(html);
+                showAlert('評估完成！', 'success');
             },
             error: function(error) {
                 $('#evaluationResults').html(`<div class="alert alert-danger">評估失敗: ${error.responseJSON?.message || '未知錯誤'}</div>`);
+                showAlert('評估失敗: ' + (error.responseJSON?.message || '未知錯誤'), 'danger');
             }
         });
     });
@@ -486,8 +570,10 @@ $(document).ready(function() {
         $('.prediction-set').each(function() {
             const predSet = [];
             $(this).find('.prediction-numbers').each(function() {
-                const numbersText = $(this).text();
-                const numbers = numbersText.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+                const numbers = [];
+                $(this).find('.number-ball').each(function() {
+                    numbers.push(parseInt($(this).text()));
+                });
                 if (numbers.length > 0) {
                     predSet.push(numbers);
                 }
@@ -521,6 +607,7 @@ $(document).ready(function() {
         
         $('#optimizeModal').modal('hide');
         $('#optimizationProgress').html('<div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div></div>');
+        $('#stopOptimizeBtn').prop('disabled', false);
         
         $.ajax({
             url: '/optimize',
@@ -542,26 +629,109 @@ $(document).ready(function() {
                 html += '</div></div>';
                 
                 $('#optimizationResults').html(html);
+                $('#stopOptimizeBtn').prop('disabled', true);
             },
             error: function(error) {
                 $('#optimizationProgress').html('');
-                showAlert(`參數優化失敗: ${error.responseJSON?.message || '未知錯誤'}`, 'danger');
+                if (error.status === 499) { // 自定義狀態碼，表示用戶取消
+                    showAlert('參數優化已取消', 'warning');
+                } else {
+                    showAlert(`參數優化失敗: ${error.responseJSON?.message || '未知錯誤'}`, 'danger');
+                }
+                $('#stopOptimizeBtn').prop('disabled', true);
             }
         });
+        
+        // 定期檢查優化進度
+        checkOptimizationProgress();
     });
 
-    // 初始化頁面
-    $(document).ready(function() {
-        // 載入多樣性設置
-        const diversityMethod = localStorage.getItem('diversityMethod') || 'hybrid';
-        const diversityLevel = localStorage.getItem('diversityLevel') || '0.2';
+    // 設置實際開獎號碼
+    $('#setActualNumbers').click(function() {
+        const numbersText = $('#actualNumbers').val();
+        const numbers = numbersText.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
         
-        $('#diversityMethod').val(diversityMethod);
-        $('#diversityLevel').val(diversityLevel);
+        if (numbers.length < 5) {
+            showAlert('請輸入至少5個有效號碼', 'warning');
+            return;
+        }
         
-        // 載入數據摘要
-        loadDataSummary();
+        // 填充到評估區域
+        for (let i = 0; i < Math.min(numbers.length, 5); i++) {
+            $('#actualNum' + (i + 1)).val(numbers[i]);
+        }
+        
+        showAlert('實際開獎號碼已設置', 'success');
     });
+
+    // 定期檢查訓練進度
+    function checkTrainingProgress() {
+        const progressInterval = setInterval(function() {
+            $.ajax({
+                url: '/training_progress',
+                method: 'GET',
+                success: function(response) {
+                    // 更新進度條
+                    const progress = response.progress;
+                    $('#trainingProgressBar').css('width', progress + '%').attr('aria-valuenow', progress);
+                    
+                    // 更新進度文字
+                    $('#trainingProgressText').text(response.status);
+                    
+                    // 更新當前模型
+                    if (response.current_model) {
+                        $('#trainingCurrentModel').text('當前訓練模型: ' + response.current_model);
+                    }
+                    
+                    // 如果訓練完成或取消，停止檢查
+                    if (response.completed || response.cancelled) {
+                        clearInterval(progressInterval);
+                        
+                        if (response.completed) {
+                            $('#trainingProgressText').text('訓練完成！');
+                            setTimeout(function() {
+                                $('#trainingProgressModal').modal('hide');
+                            }, 1500);
+                        } else if (response.cancelled) {
+                            $('#trainingProgressText').text('訓練已取消');
+                            setTimeout(function() {
+                                $('#trainingProgressModal').modal('hide');
+                            }, 1500);
+                        }
+                    }
+                },
+                error: function(error) {
+                    console.error('獲取訓練進度失敗:', error);
+                    clearInterval(progressInterval);
+                }
+            });
+        }, 1000); // 每秒檢查一次
+    }
+    
+    // 定期檢查優化進度
+    function checkOptimizationProgress() {
+        const progressInterval = setInterval(function() {
+            $.ajax({
+                url: '/optimization_progress',
+                method: 'GET',
+                success: function(response) {
+                    // 更新進度
+                    const progress = response.progress;
+                    const progressBar = $('.progress-bar');
+                    progressBar.css('width', progress + '%').attr('aria-valuenow', progress);
+                    
+                    // 如果優化完成或取消，停止檢查
+                    if (response.completed || response.cancelled) {
+                        clearInterval(progressInterval);
+                    }
+                },
+                error: function(error) {
+                    console.error('獲取優化進度失敗:', error);
+                    clearInterval(progressInterval);
+                }
+            });
+        }, 1000); // 每秒檢查一次
+    }
 
     // 載入數據摘要
     function loadDataSummary() {
@@ -611,12 +781,17 @@ $(document).ready(function() {
     function createFrequencyChart(frequencies) {
         const ctx = document.getElementById('frequencyChart').getContext('2d');
         
+        // 如果已經存在圖表，先銷毀
+        if (window.frequencyChartInstance) {
+            window.frequencyChartInstance.destroy();
+        }
+        
         // 準備數據
         const labels = frequencies.map(item => item.number);
         const data = frequencies.map(item => item.percentage);
         
         // 創建圖表
-        new Chart(ctx, {
+        window.frequencyChartInstance = new Chart(ctx, {
             type: 'bar',
             data: {
                 labels: labels,
@@ -663,4 +838,11 @@ $(document).ready(function() {
             $('.alert').alert('close');
         }, 5000);
     }
+    
+    // 初始化多樣性設置
+    const diversityMethod = localStorage.getItem('diversityMethod') || 'hybrid';
+    const diversityLevel = localStorage.getItem('diversityLevel') || '0.2';
+    
+    $('#diversityMethod').val(diversityMethod);
+    $('#diversityLevel').val(diversityLevel);
 });

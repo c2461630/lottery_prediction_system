@@ -1,0 +1,8 @@
+{
+  "python.analysis.extraPaths": ["C:\\Users\\User\\miniconda3\\envs\\tf-env\\Lib\\site-packages"],
+  "python.linting.enabled": true,
+  "python.linting.pylintEnabled": true,
+  "python.analysis.diagnosticSeverityOverrides": {
+      "reportMissingImports": "none"
+  }
+}

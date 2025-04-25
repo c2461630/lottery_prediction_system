@@ -1,13 +1,15 @@
 import os
 import pandas as pd
 import numpy as np
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify,send_from_directory
 import joblib
 import traceback
 import logging
 from datetime import datetime
 import json
 import random
+import time
+import optuna
 from src.features.feature_engineering import LotteryFeatureEngineering
 from src.models.model_trainer import LotteryModelTrainer
 from src.evaluation.evaluator import LotteryEvaluator
@@ -39,18 +41,42 @@ for directory in [MODEL_DIR, RESULTS_DIR, 'data']:
 # 初始化多樣性增強器
 diversity_enhancer = DiversityEnhancer()
 
+# 全局變數用於追蹤訓練和優化進度
+training_progress = {
+    'progress': 0,
+    'status': '準備訓練...',
+    'current_model': None,
+    'completed': False,
+    'cancelled': False
+}
+
+optimization_progress = {
+    'progress': 0,
+    'status': '準備優化...',
+    'completed': False,
+    'cancelled': False
+}
+
+# 全局變數用於存儲當前的訓練器和優化器
+current_trainer = None
+current_study = None
+
 # 模擬數據
 def generate_sample_data(n_samples=200):
     data = []
     for i in range(n_samples):
         # 生成隨機號碼 (1-49)
-        numbers = sorted(random.sample(range(1, 50), 6))
+        numbers = sorted(random.sample(range(1, 50), 5))
         # 添加日期 (過去n天)
         date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         date = date.replace(day=date.day - i)
         data.append({
             'date': date.strftime('%Y-%m-%d'),
-            'numbers': numbers
+            'num1': numbers[0],
+            'num2': numbers[1],
+            'num3': numbers[2],
+            'num4': numbers[3],
+            'num5': numbers[4]
         })
     return data
 
@@ -71,6 +97,17 @@ def index():
 def train_models():
     """訓練模型"""
     try:
+        global training_progress, current_trainer
+        
+        # 重置訓練進度
+        training_progress = {
+            'progress': 0,
+            'status': '準備訓練...',
+            'current_model': None,
+            'completed': False,
+            'cancelled': False
+        }
+        
         logger.info("開始訓練模型...")
         
         # 檢查數據文件是否存在
@@ -87,6 +124,8 @@ def train_models():
             fe = LotteryFeatureEngineering(DATA_PATH)
             data = fe.load_data()
             logger.info(f"數據載入成功，共 {len(data)} 條記錄")
+            training_progress['progress'] = 5
+            training_progress['status'] = '數據載入成功'
         except Exception as e:
             logger.error(f"載入數據時出錯: {str(e)}")
             logger.error(traceback.format_exc())
@@ -100,6 +139,8 @@ def train_models():
         try:
             features = fe.create_complex_features()
             logger.info(f"特徵創建成功，共 {features.shape[1]} 個特徵")
+            training_progress['progress'] = 10
+            training_progress['status'] = '特徵創建成功'
         except Exception as e:
             logger.error(f"創建特徵時出錯: {str(e)}")
             logger.error(traceback.format_exc())
@@ -113,6 +154,8 @@ def train_models():
         try:
             X, y = fe.get_training_data()
             logger.info(f"訓練數據準備完成，特徵數量: {X.shape[1]}，樣本數量: {X.shape[0]}")
+            training_progress['progress'] = 15
+            training_progress['status'] = '訓練數據準備完成'
         except Exception as e:
             logger.error(f"準備訓練數據時出錯: {str(e)}")
             logger.error(traceback.format_exc())
@@ -125,7 +168,10 @@ def train_models():
         logger.info("初始化模型訓練器...")
         try:
             trainer = LotteryModelTrainer(X, y, model_dir=MODEL_DIR)
+            current_trainer = trainer  # 保存訓練器的引用
             logger.info("模型訓練器初始化成功")
+            training_progress['progress'] = 20
+            training_progress['status'] = '模型訓練器初始化成功'
         except Exception as e:
             logger.error(f"初始化模型訓練器時出錯: {str(e)}")
             logger.error(traceback.format_exc())
@@ -139,6 +185,8 @@ def train_models():
         try:
             X_train, X_test, y_train, y_test = trainer.train_test_split()
             logger.info(f"數據分割完成，訓練集: {X_train.shape[0]} 樣本，測試集: {X_test.shape[0]} 樣本")
+            training_progress['progress'] = 25
+            training_progress['status'] = '數據分割完成'
         except Exception as e:
             logger.error(f"分割數據時出錯: {str(e)}")
             logger.error(traceback.format_exc())
@@ -153,57 +201,147 @@ def train_models():
         results = {}
         cv_results = {}
         
+        # 檢查是否應該停止訓練
+        if trainer.should_stop:
+            logger.info("訓練已被用戶取消")
+            training_progress['cancelled'] = True
+            training_progress['status'] = '訓練已取消'
+            return jsonify({
+                'status': 'cancelled',
+                'message': '訓練已被用戶取消'
+            }), 499
+        
         # 訓練隨機森林模型
         try:
             logger.info("訓練隨機森林模型...")
+            training_progress['current_model'] = 'random_forest'
+            training_progress['status'] = '訓練隨機森林模型'
+            training_progress['progress'] = 30
+            
             models['random_forest'] = trainer.train_random_forest(optimize=True)
             logger.info("隨機森林模型訓練完成")
+            training_progress['progress'] = 40
         except Exception as e:
             logger.error(f"訓練隨機森林模型時出錯: {str(e)}")
             logger.error(traceback.format_exc())
         
+        # 檢查是否應該停止訓練
+        if trainer.should_stop:
+            logger.info("訓練已被用戶取消")
+            training_progress['cancelled'] = True
+            training_progress['status'] = '訓練已取消'
+            return jsonify({
+                'status': 'cancelled',
+                'message': '訓練已被用戶取消'
+            }), 499
+        
         # 訓練XGBoost模型
         try:
             logger.info("訓練XGBoost模型...")
+            training_progress['current_model'] = 'xgboost'
+            training_progress['status'] = '訓練XGBoost模型'
+            training_progress['progress'] = 45
+            
             models['xgboost'] = trainer.train_xgboost(optimize=True)
             logger.info("XGBoost模型訓練完成")
+            training_progress['progress'] = 55
         except Exception as e:
             logger.error(f"訓練XGBoost模型時出錯: {str(e)}")
             logger.error(traceback.format_exc())
         
+        # 檢查是否應該停止訓練
+        if trainer.should_stop:
+            logger.info("訓練已被用戶取消")
+            training_progress['cancelled'] = True
+            training_progress['status'] = '訓練已取消'
+            return jsonify({
+                'status': 'cancelled',
+                'message': '訓練已被用戶取消'
+            }), 499
+        
         # 訓練LightGBM模型
         try:
             logger.info("訓練LightGBM模型...")
+            training_progress['current_model'] = 'lightgbm'
+            training_progress['status'] = '訓練LightGBM模型'
+            training_progress['progress'] = 60
+            
             models['lightgbm'] = trainer.train_lightgbm(optimize=True)
             logger.info("LightGBM模型訓練完成")
+            training_progress['progress'] = 70
         except Exception as e:
             logger.error(f"訓練LightGBM模型時出錯: {str(e)}")
             logger.error(traceback.format_exc())
         
+        # 檢查是否應該停止訓練
+        if trainer.should_stop:
+            logger.info("訓練已被用戶取消")
+            training_progress['cancelled'] = True
+            training_progress['status'] = '訓練已取消'
+            return jsonify({
+                'status': 'cancelled',
+                'message': '訓練已被用戶取消'
+            }), 499
+        
         # 訓練CatBoost模型
         try:
             logger.info("訓練CatBoost模型...")
+            training_progress['current_model'] = 'catboost'
+            training_progress['status'] = '訓練CatBoost模型'
+            training_progress['progress'] = 75
+            
             models['catboost'] = trainer.train_catboost(optimize=True)
             logger.info("CatBoost模型訓練完成")
+            training_progress['progress'] = 85
         except Exception as e:
             logger.error(f"訓練CatBoost模型時出錯: {str(e)}")
             logger.error(traceback.format_exc())
         
+        # 檢查是否應該停止訓練
+        if trainer.should_stop:
+            logger.info("訓練已被用戶取消")
+            training_progress['cancelled'] = True
+            training_progress['status'] = '訓練已取消'
+            return jsonify({
+                'status': 'cancelled',
+                'message': '訓練已被用戶取消'
+            }), 499
+        
         # 訓練神經網絡模型
         try:
             logger.info("訓練神經網絡模型...")
+            training_progress['current_model'] = 'neural_network'
+            training_progress['status'] = '訓練神經網絡模型'
+            training_progress['progress'] = 90
+            
             models['neural_network'] = trainer.train_neural_network(optimize=True)
             logger.info("神經網絡模型訓練完成")
+            training_progress['progress'] = 95
         except Exception as e:
             logger.error(f"訓練神經網絡模型時出錯: {str(e)}")
             logger.error(traceback.format_exc())
+        
+        # 檢查是否應該停止訓練
+        if trainer.should_stop:
+            logger.info("訓練已被用戶取消")
+            training_progress['cancelled'] = True
+            training_progress['status'] = '訓練已取消'
+            return jsonify({
+                'status': 'cancelled',
+                'message': '訓練已被用戶取消'
+            }), 499
         
         # 訓練集成模型
         if len(models) >= 2:  # 至少需要2個模型才能集成
             try:
                 logger.info("訓練集成模型...")
+                training_progress['current_model'] = 'ensemble'
+                training_progress['status'] = '訓練集成模型'
+                training_progress['progress'] = 97
+                
                 models['ensemble'] = trainer.train_ensemble()
                 logger.info("集成模型訓練完成")
+                training_progress['progress'] = 99
             except Exception as e:
                 logger.error(f"訓練集成模型時出錯: {str(e)}")
                 logger.error(traceback.format_exc())
@@ -212,6 +350,8 @@ def train_models():
         
         # 評估模型
         logger.info("評估模型...")
+        training_progress['status'] = '評估模型'
+        
         for model_name in models.keys():
             try:
                 results[model_name] = trainer.evaluate_model(model_name)
@@ -219,1078 +359,957 @@ def train_models():
             except Exception as e:
                 logger.error(f"評估 {model_name} 模型時出錯: {str(e)}")
                 logger.error(traceback.format_exc())
-                results[model_name] = {"error": str(e)}
         
         # 交叉驗證
-        logger.info("進行交叉驗證...")
+        logger.info("執行交叉驗證...")
+        training_progress['status'] = '執行交叉驗證'
+        
         for model_name in ['random_forest', 'xgboost', 'lightgbm', 'catboost']:
             if model_name in models:
                 try:
                     cv_results[model_name] = trainer.cross_validate(model_name)
                     logger.info(f"{model_name} 模型交叉驗證完成")
                 except Exception as e:
-                    logger.error(f"{model_name} 模型交叉驗證時出錯: {str(e)}")
+                    logger.error(f"交叉驗證 {model_name} 模型時出錯: {str(e)}")
                     logger.error(traceback.format_exc())
-                    cv_results[model_name] = {"error": str(e)}
         
-        logger.info("模型訓練和評估完成")
+        # 保存評估結果
+        logger.info("保存評估結果...")
+        training_progress['status'] = '保存評估結果'
+        
+        try:
+            results_path = os.path.join(RESULTS_DIR, 'evaluation_results.json')
+            with open(results_path, 'w') as f:
+                json.dump(results, f, indent=4)
+            
+            cv_results_path = os.path.join(RESULTS_DIR, 'cv_results.json')
+            with open(cv_results_path, 'w') as f:
+                json.dump(cv_results, f, indent=4)
+            
+            logger.info(f"評估結果已保存至 {results_path} 和 {cv_results_path}")
+        except Exception as e:
+            logger.error(f"保存評估結果時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+        
+        # 訓練完成
+        training_progress['progress'] = 100
+        training_progress['status'] = '訓練完成'
+        training_progress['completed'] = True
+        logger.info("模型訓練完成")
+        
         return jsonify({
             'status': 'success',
-            'message': 'Models trained successfully',
-            'models_trained': list(models.keys()),
-            'evaluation': results,
-            'cross_validation': cv_results
+            'message': '模型訓練成功',
+            'models': list(models.keys()),
+            'results': results
         })
     
     except Exception as e:
-        logger.error(f"訓練過程中發生未處理的錯誤: {str(e)}")
+        logger.error(f"訓練模型時出錯: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({
             'status': 'error',
-            'message': str(e)
+            'message': f"訓練模型時出錯: {str(e)}"
+        }), 500
+
+@app.route('/stop_training', methods=['POST'])
+def stop_training():
+    """終止訓練過程"""
+    try:
+        global current_trainer, training_progress
+        
+        if current_trainer:
+            current_trainer.should_stop = True
+            logger.info("已發送終止訓練請求")
+            training_progress['status'] = '正在終止訓練...'
+            
+            return jsonify({
+                'status': 'success',
+                'message': '已發送終止訓練請求'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': '沒有正在進行的訓練'
+            }), 400
+    
+    except Exception as e:
+        logger.error(f"終止訓練時出錯: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'status': 'error',
+            'message': f"終止訓練時出錯: {str(e)}"
+        }), 500
+
+@app.route('/training_progress', methods=['GET'])
+def get_training_progress():
+    """獲取訓練進度"""
+    global training_progress
+    return jsonify(training_progress)
+
+@app.route('/train_advanced', methods=['POST'])
+def train_advanced():
+    """高級訓練模型，可以指定更多參數"""
+    try:
+        global training_progress, current_trainer
+        
+        # 獲取請求參數
+        data = request.json
+        epochs = data.get('epochs', 100)
+        batch_size = data.get('batch_size', 32)
+        
+        # 重置訓練進度
+        training_progress = {
+            'progress': 0,
+            'status': '準備高級訓練...',
+            'current_model': None,
+            'completed': False,
+            'cancelled': False
+        }
+        
+        logger.info(f"開始高級訓練模型，epochs={epochs}, batch_size={batch_size}...")
+        
+        # 檢查數據文件是否存在
+        if not os.path.exists(DATA_PATH):
+            logger.error(f"數據文件不存在: {DATA_PATH}")
+            return jsonify({
+                'status': 'error',
+                'message': f"數據文件不存在: {DATA_PATH}"
+            }), 400
+        
+        # 載入並處理數據
+        logger.info("載入並處理數據...")
+        try:
+            fe = LotteryFeatureEngineering(DATA_PATH)
+            data = fe.load_data()
+            logger.info(f"數據載入成功，共 {len(data)} 條記錄")
+            training_progress['progress'] = 5
+            training_progress['status'] = '數據載入成功'
+        except Exception as e:
+            logger.error(f"載入數據時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+            return jsonify({
+                'status': 'error',
+                'message': f"載入數據時出錯: {str(e)}"
+            }), 500
+        
+        # 創建特徵
+        logger.info("創建特徵...")
+        try:
+            features = fe.create_complex_features()
+            logger.info(f"特徵創建成功，共 {features.shape[1]} 個特徵")
+            training_progress['progress'] = 10
+            training_progress['status'] = '特徵創建成功'
+        except Exception as e:
+            logger.error(f"創建特徵時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+            return jsonify({
+                'status': 'error',
+                'message': f"創建特徵時出錯: {str(e)}"
+            }), 500
+        
+        # 準備訓練數據
+        logger.info("準備訓練數據...")
+        try:
+            X, y = fe.get_training_data()
+            logger.info(f"訓練數據準備完成，特徵數量: {X.shape[1]}，樣本數量: {X.shape[0]}")
+            training_progress['progress'] = 15
+            training_progress['status'] = '訓練數據準備完成'
+        except Exception as e:
+            logger.error(f"準備訓練數據時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+            return jsonify({
+                'status': 'error',
+                'message': f"準備訓練數據時出錯: {str(e)}"
+            }), 500
+        
+        # 初始化模型訓練器
+        logger.info("初始化模型訓練器...")
+        try:
+            trainer = LotteryModelTrainer(X, y, model_dir=MODEL_DIR)
+            current_trainer = trainer  # 保存訓練器的引用
+            logger.info("模型訓練器初始化成功")
+            training_progress['progress'] = 20
+            training_progress['status'] = '模型訓練器初始化成功'
+        except Exception as e:
+            logger.error(f"初始化模型訓練器時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+            return jsonify({
+                'status': 'error',
+                'message': f"初始化模型訓練器時出錯: {str(e)}"
+            }), 500
+        
+        # 分割訓練集和測試集
+        logger.info("分割訓練集和測試集...")
+        try:
+            X_train, X_test, y_train, y_test = trainer.train_test_split()
+            logger.info(f"數據分割完成，訓練集: {X_train.shape[0]} 樣本，測試集: {X_test.shape[0]} 樣本")
+            training_progress['progress'] = 25
+            training_progress['status'] = '數據分割完成'
+        except Exception as e:
+            logger.error(f"分割數據時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+            return jsonify({
+                'status': 'error',
+                'message': f"分割數據時出錯: {str(e)}"
+            }), 500
+        
+        # 訓練神經網絡模型
+        try:
+            logger.info("訓練神經網絡模型...")
+            training_progress['current_model'] = 'neural_network'
+            training_progress['status'] = '訓練神經網絡模型'
+            training_progress['progress'] = 30
+            
+            # 這裡可以添加更多的高級訓練參數
+            models = trainer.train_neural_network(optimize=True)
+            logger.info("神經網絡模型訓練完成")
+            training_progress['progress'] = 90
+        except Exception as e:
+            logger.error(f"訓練神經網絡模型時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+            return jsonify({
+                'status': 'error',
+                'message': f"訓練神經網絡模型時出錯: {str(e)}"
+            }), 500
+        
+        # 評估模型
+        logger.info("評估神經網絡模型...")
+        training_progress['status'] = '評估神經網絡模型'
+        training_progress['progress'] = 95
+        
+        try:
+            results = trainer.evaluate_model('neural_network')
+            logger.info("神經網絡模型評估完成")
+        except Exception as e:
+            logger.error(f"評估神經網絡模型時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+            return jsonify({
+                'status': 'error',
+                'message': f"評估神經網絡模型時出錯: {str(e)}"
+            }), 500
+        
+        # 訓練完成
+        training_progress['progress'] = 100
+        training_progress['status'] = '高級訓練完成'
+        training_progress['completed'] = True
+        logger.info("高級模型訓練完成")
+        
+        return jsonify({
+            'status': 'success',
+            'message': '高級模型訓練成功',
+            'model': 'neural_network',
+            'results': results
+        })
+    
+    except Exception as e:
+        logger.error(f"高級訓練模型時出錯: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'status': 'error',
+            'message': f"高級訓練模型時出錯: {str(e)}"
         }), 500
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    """預測彩票號碼"""
+    """生成預測"""
     try:
-        logger.info("開始預測...")
-        
-        # 獲取請求數據
         data = request.json
         model_name = data.get('model_name', 'ensemble')
         num_sets = data.get('num_sets', 5)
         
-        logger.info(f"使用 {model_name} 模型生成 {num_sets} 組預測")
+        logger.info(f"使用 {model_name} 模型生成 {num_sets} 組預測...")
         
-        # 檢查數據文件是否存在
-        if not os.path.exists(DATA_PATH):
-            logger.error(f"數據文件不存在: {DATA_PATH}")
-            return jsonify({
-                'status': 'error',
-                'message': f"數據文件不存在: {DATA_PATH}"
-            }), 400
+        # 載入特徵工程器
+        fe = LotteryFeatureEngineering(DATA_PATH)
         
-        # 載入並處理數據
-        logger.info("載入並處理數據...")
-        try:
-            fe = LotteryFeatureEngineering(DATA_PATH)
-            lottery_data = fe.load_data()
-            features = fe.create_complex_features()
-            logger.info("數據處理完成")
-        except Exception as e:
-            logger.error(f"處理數據時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"處理數據時出錯: {str(e)}"
-            }), 500
-        
-        # 準備訓練數據
-        logger.info("準備訓練數據...")
-        try:
-            X, y = fe.get_training_data()
-            logger.info("訓練數據準備完成")
-        except Exception as e:
-            logger.error(f"準備訓練數據時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"準備訓練數據時出錯: {str(e)}"
-            }), 500
-        
-        # 初始化模型訓練器
-        logger.info("初始化模型訓練器...")
-        try:
-            trainer = LotteryModelTrainer(X, y, model_dir=MODEL_DIR)
-            logger.info("模型訓練器初始化成功")
-        except Exception as e:
-            logger.error(f"初始化模型訓練器時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"初始化模型訓練器時出錯: {str(e)}"
-            }), 500
-        
-        # 分割訓練集和測試集
-        logger.info("分割訓練集和測試集...")
-        try:
-            X_train, X_test, y_train, y_test = trainer.train_test_split()
-            logger.info("數據分割完成")
-        except Exception as e:
-            logger.error(f"分割數據時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"分割數據時出錯: {str(e)}"
-            }), 500
+        # 獲取最新數據作為預測輸入
+        X_new = fe.get_latest_features()
         
         # 載入模型
-        logger.info(f"載入 {model_name} 模型...")
-        if model_name == 'ensemble':
+        if model_name == 'random_forest':
+            model_path = os.path.join(MODEL_DIR, 'random_forest_model.pkl')
+            model = joblib.load(model_path)
+        elif model_name == 'xgboost':
+            model_path = os.path.join(MODEL_DIR, 'xgboost_model.pkl')
+            model = joblib.load(model_path)
+        elif model_name == 'lightgbm':
+            model_path = os.path.join(MODEL_DIR, 'lightgbm_model.pkl')
+            model = joblib.load(model_path)
+        elif model_name == 'catboost':
+            model_path = os.path.join(MODEL_DIR, 'catboost_model.pkl')
+            model = joblib.load(model_path)
+        elif model_name == 'neural_network':
+            # 神經網絡模型需要特殊處理
+            model = {}
+            for i in range(5):  # 假設有5個目標列
+                model_path = os.path.join(MODEL_DIR, f'nn_model_num{i+1}.h5')
+                if os.path.exists(model_path):
+                    model[f'num{i+1}'] = joblib.load(model_path)
+        else:  # 默認使用集成模型
             model_path = os.path.join(MODEL_DIR, 'ensemble_model.pkl')
-            if os.path.exists(model_path):
-                try:
-                    trainer.ensemble_model = joblib.load(model_path)
-                    logger.info("集成模型載入成功")
-                except Exception as e:
-                    logger.error(f"載入集成模型時出錯: {str(e)}")
-                    logger.error(traceback.format_exc())
-                    return jsonify({
-                        'status': 'error',
-                        'message': f"載入集成模型時出錯: {str(e)}"
-                    }), 500
-            else:
-                logger.error(f"集成模型文件不存在: {model_path}")
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Ensemble model not found. Please train the model first.'
-                }), 404
-        else:
-            model_path = os.path.join(MODEL_DIR, f'{model_name}_model.pkl')
-            if os.path.exists(model_path):
-                try:
-                    trainer.models[model_name] = joblib.load(model_path)
-                    logger.info(f"{model_name} 模型載入成功")
-                except Exception as e:
-                    logger.error(f"載入 {model_name} 模型時出錯: {str(e)}")
-                    logger.error(traceback.format_exc())
-                    return jsonify({
-                        'status': 'error',
-                        'message': f"載入 {model_name} 模型時出錯: {str(e)}"
-                    }), 500
-            else:
-                logger.error(f"{model_name} 模型文件不存在: {model_path}")
-                return jsonify({
-                    'status': 'error',
-                    'message': f'{model_name} model not found. Please train the model first.'
-                }), 404
+            model = joblib.load(model_path)
         
-        # 使用最新的數據進行預測
-        logger.info("準備最新數據進行預測...")
-        try:
-            latest_data = X.iloc[-1:].copy()
-            logger.info("最新數據準備完成")
-        except Exception as e:
-            logger.error(f"準備最新數據時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"準備最新數據時出錯: {str(e)}"
-            }), 500
+        # 初始化模型訓練器
+        X, y = fe.get_training_data()
+        trainer = LotteryModelTrainer(X, y, model_dir=MODEL_DIR)
         
         # 生成預測
-        logger.info("生成預測...")
-        try:
-            predictions = trainer.generate_lottery_numbers(latest_data, model_name, num_sets)
-            logger.info(f"成功生成 {len(predictions)} 組預測")
-            
-            # 使用多樣性增強器增強預測結果
-            logger.info("增強預測結果的多樣性...")
-            enhanced_predictions = diversity_enhancer.enhance_diversity(predictions, num_sets)
-            logger.info("預測結果多樣性增強完成")
-            
-        except Exception as e:
-            logger.error(f"生成預測時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"生成預測時出錯: {str(e)}"
-            }), 500
+        predictions = []
+        for _ in range(num_sets):
+            pred_set = trainer.generate_lottery_numbers(X_new, model_name=model_name)
+            predictions.append(pred_set)
         
-        # 格式化預測結果
-        formatted_predictions = []
-        for pred_set in enhanced_predictions:
-            formatted_set = []
-            for numbers in pred_set:
-                formatted_set.append(numbers)
-            formatted_predictions.append(formatted_set)
+        # 應用多樣性增強
+        diversity_method = request.cookies.get('diversityMethod', 'hybrid')
+        diversity_level = float(request.cookies.get('diversityLevel', 0.2))
         
-        logger.info("預測完成")
+        if diversity_method != 'none' and diversity_level > 0:
+            predictions = diversity_enhancer.enhance_diversity(
+                predictions, 
+                method=diversity_method, 
+                level=diversity_level
+            )
+        
+        logger.info(f"成功生成 {len(predictions)} 組預測")
+        
         return jsonify({
             'status': 'success',
-            'predictions': formatted_predictions,
-            'model_used': model_name
+            'model': model_name,
+            'predictions': predictions
         })
     
     except Exception as e:
-        logger.error(f"預測過程中發生未處理的錯誤: {str(e)}")
+        logger.error(f"生成預測時出錯: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({
             'status': 'error',
-            'message': str(e)
+            'message': f"生成預測時出錯: {str(e)}"
         }), 500
 
 @app.route('/predict_with_best_params', methods=['POST'])
 def predict_with_best_params():
-    """使用最佳參數進行預測"""
     try:
-        logger.info("開始使用最佳參數進行預測...")
-        
-        # 獲取請求數據
-        data = request.json
+        data = request.get_json()
         num_sets = data.get('num_sets', 5)
         
-        # 檢查數據文件是否存在
-        if not os.path.exists(DATA_PATH):
-            logger.error(f"數據文件不存在: {DATA_PATH}")
-            return jsonify({
-                'status': 'error',
-                'message': f"數據文件不存在: {DATA_PATH}"
-            }), 400
+        app.logger.info(f"使用最佳參數生成 {num_sets} 組預測...")
         
-        # 載入並處理數據
-        logger.info("載入並處理數據...")
-        try:
-            fe = LotteryFeatureEngineering(DATA_PATH)
-            lottery_data = fe.load_data()
-            features = fe.create_complex_features()
-            logger.info("數據處理完成")
-        except Exception as e:
-            logger.error(f"處理數據時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"處理數據時出錯: {str(e)}"
-            }), 500
+        # 載入特徵工程器
+        fe = LotteryFeatureEngineering(DATA_PATH)
         
-        # 準備訓練數據
-        logger.info("準備訓練數據...")
-        try:
-            X, y = fe.get_training_data()
-            logger.info("訓練數據準備完成")
-        except Exception as e:
-            logger.error(f"準備訓練數據時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"準備訓練數據時出錯: {str(e)}"
-            }), 500
+        # 創建特徵
+        fe.create_basic_features()
+        fe.create_advanced_features()
+        X_train, y_train = fe.get_training_data()
+        
+        # 確保 X_new 是正確的格式
+        X_new = X_train.iloc[-1:].copy()
+        app.logger.info(f"X_new 形狀: {X_new.shape}, 類型: {type(X_new)}")
+        
+        # 檢查 X_new 是否包含 NaN 值
+        if X_new.isna().any().any():
+            app.logger.warning("X_new 包含 NaN 值，將進行填充")
+            X_new = X_new.fillna(X_train.mean())
         
         # 初始化模型訓練器
-        logger.info("初始化模型訓練器...")
-        try:
-            trainer = LotteryModelTrainer(X, y, model_dir=MODEL_DIR)
-            logger.info("模型訓練器初始化成功")
-        except Exception as e:
-            logger.error(f"初始化模型訓練器時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"初始化模型訓練器時出錯: {str(e)}"
-            }), 500
-        
-        # 分割訓練集和測試集
-        logger.info("分割訓練集和測試集...")
-        try:
-            X_train, X_test, y_train, y_test = trainer.train_test_split()
-            logger.info("數據分割完成")
-        except Exception as e:
-            logger.error(f"分割數據時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"分割數據時出錯: {str(e)}"
-            }), 500
+        trainer = LotteryModelTrainer(X_train, y_train, model_dir=MODEL_DIR)
         
         # 載入最佳參數
-        logger.info("載入最佳參數...")
-        try:
-            best_params = trainer.load_optimal_parameters()
-            
-            if best_params is None:
-                logger.warning("未找到最佳參數，將使用默認模型進行預測")
-                model_name = 'ensemble'  # 默認使用ensemble模型
-            else:
-                logger.info(f"使用最佳模型 {best_params['model_name']} 進行預測，歷史命中率: {best_params['hit_rate']:.2f}%")
-                model_name = best_params['model_name']
-        except Exception as e:
-            logger.error(f"載入最佳參數時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"載入最佳參數時出錯: {str(e)}"
-            }), 500
-        
-        # 載入模型
-        logger.info(f"載入 {model_name} 模型...")
-        if model_name == 'ensemble':
-            model_path = os.path.join(MODEL_DIR, 'ensemble_model.pkl')
-            if os.path.exists(model_path):
-                try:
-                    trainer.ensemble_model = joblib.load(model_path)
-                    logger.info("集成模型載入成功")
-                except Exception as e:
-                    logger.error(f"載入集成模型時出錯: {str(e)}")
-                    logger.error(traceback.format_exc())
-                    return jsonify({
-                        'status': 'error',
-                        'message': f"載入集成模型時出錯: {str(e)}"
-                    }), 500
-            else:
-                logger.error(f"集成模型文件不存在: {model_path}")
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Ensemble model not found. Please train the model first.'
-                }), 404
+        optimal_params = trainer.load_optimal_parameters()
+        if optimal_params:
+            model_name = optimal_params.get('model_name', 'random_forest')
+            hit_rate = optimal_params.get('hit_rate', 0)
         else:
+            # 如果沒有最佳參數文件，使用默認值
+            params_path = os.path.join(MODEL_DIR, 'optimal_parameters.json')
+            if os.path.exists(params_path):
+                with open(params_path, 'r') as f:
+                    optimal_params = json.load(f)
+                model_name = optimal_params.get('model_name', 'random_forest')
+                hit_rate = optimal_params.get('hit_rate', 0)
+            else:
+                model_name = 'random_forest'
+                hit_rate = 0
+        
+        app.logger.info(f"使用模型 {model_name}，歷史命中率: {hit_rate}%")
+        
+        # 嘗試載入模型
+        try:
             model_path = os.path.join(MODEL_DIR, f'{model_name}_model.pkl')
             if os.path.exists(model_path):
-                try:
+                if model_name == 'random_forest':
                     trainer.models[model_name] = joblib.load(model_path)
-                    logger.info(f"{model_name} 模型載入成功")
-                except Exception as e:
-                    logger.error(f"載入 {model_name} 模型時出錯: {str(e)}")
-                    logger.error(traceback.format_exc())
-                    return jsonify({
-                        'status': 'error',
-                        'message': f"載入 {model_name} 模型時出錯: {str(e)}"
-                    }), 500
+                else:
+                    trainer.models[model_name] = joblib.load(model_path)
+                app.logger.info(f"已載入 {model_name} 模型")
             else:
-                logger.error(f"{model_name} 模型文件不存在: {model_path}")
-                return jsonify({
-                    'status': 'error',
-                    'message': f'{model_name} model not found. Please train the model first.'
-                }), 404
-        
-        # 使用最新的數據進行預測
-        logger.info("準備最新數據進行預測...")
-        try:
-            latest_data = X.iloc[-1:].copy()
-            logger.info("最新數據準備完成")
+                app.logger.error(f"找不到 {model_name} 模型文件")
+                return jsonify({'error': f"找不到 {model_name} 模型文件，請先訓練模型"}), 500
         except Exception as e:
-            logger.error(f"準備最新數據時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"準備最新數據時出錯: {str(e)}"
-            }), 500
+            app.logger.error(f"載入 {model_name} 模型時出錯: {str(e)}")
+            return jsonify({'error': f"載入模型時出錯: {str(e)}"}), 500
+        
+        # 在這裡添加修正，確保 X_new 有正確的特徵名稱
+        # 從訓練數據中獲取特徵名稱
+        feature_names = X_train.columns.tolist()
+        
+        # 確保 X_new 使用相同的特徵名稱
+        X_new = pd.DataFrame(X_new.values, columns=feature_names)
         
         # 生成預測
-        logger.info("生成預測...")
         try:
-            predictions = trainer.generate_lottery_numbers(latest_data, model_name, num_sets)
-            logger.info(f"成功生成 {len(predictions)} 組預測")
-            
-            # 使用多樣性增強器增強預測結果
-            logger.info("增強預測結果的多樣性...")
-            enhanced_predictions = diversity_enhancer.enhance_diversity(predictions, num_sets)
-            logger.info("預測結果多樣性增強完成")
-            
+            predictions = []
+            for i in range(num_sets):
+                # 確保 X_new 是正確的格式
+                app.logger.info(f"生成預測 {i+1}/{num_sets}")
+                pred_set = trainer.generate_lottery_numbers(X_new, model_name=model_name)
+                app.logger.info(f"預測結果: {pred_set}")
+                predictions.append({
+                    'set_number': i + 1,
+                    'numbers': pred_set
+                })
         except Exception as e:
-            logger.error(f"生成預測時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"生成預測時出錯: {str(e)}"
-            }), 500
+            app.logger.error(f"生成預測時出錯: {str(e)}")
+            app.logger.error(traceback.format_exc())
+            return jsonify({'error': f"生成預測時出錯: {str(e)}"}), 500
         
-        # 格式化預測結果
-        formatted_predictions = []
-        for i, pred_set in enumerate(enhanced_predictions):
-            formatted_set = []
-            for numbers in pred_set:
-                formatted_set.append(numbers)
-            formatted_predictions.append({
-                'set_number': i + 1,
-                'numbers': formatted_set
-            })
+        # 增強多樣性
+        diversity_method = request.cookies.get('diversityMethod', 'hybrid')
+        diversity_level = float(request.cookies.get('diversityLevel', '0.2'))
         
-        result = {
-            'status': 'success',
-            'model': model_name,
-            'hit_rate': best_params['hit_rate'] if best_params else 'N/A',
-            'predictions': formatted_predictions
-        }
+        diversity_enhancer = DiversityEnhancer()
         
-        logger.info("預測完成")
-        return jsonify(result)
-    
-    except Exception as e:
-        logger.error(f"預測過程中發生未處理的錯誤: {str(e)}")
-        logger.error(traceback.format_exc())
+        if diversity_method != 'none' and diversity_level > 0:
+            enhanced_predictions = []
+            for i, pred in enumerate(diversity_enhancer.enhance_diversity(
+            [p['numbers'] for p in predictions],
+            method=diversity_method,
+            num_sets=len(predictions)  # 正確的參數名
+        )):
+                enhanced_predictions.append({
+                    'set_number': i + 1,
+                    'numbers': pred
+                })
+            predictions = enhanced_predictions
+        
+        app.logger.info(f"成功生成 {len(predictions)} 組預測")
+        
         return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
+            'model': model_name,
+            'hit_rate': hit_rate,
+            'predictions': predictions
+        })
+    except Exception as e:
+        app.logger.error(f"使用最佳參數生成預測時出錯: {str(e)}")
+        app.logger.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/evaluate', methods=['POST'])
 def evaluate():
     """評估預測結果"""
     try:
-        logger.info("開始評估預測結果...")
-        
-        # 獲取請求數據
         data = request.json
         predictions = data.get('predictions', [])
         actual_numbers = data.get('actual_numbers', [])
         
-        if not predictions or not actual_numbers:
-            logger.error("缺少預測結果或實際號碼")
+        logger.info(f"評估預測結果，實際號碼: {actual_numbers}")
+        
+        if not predictions:
             return jsonify({
                 'status': 'error',
-                'message': "缺少預測結果或實際號碼"
+                'message': "沒有提供預測結果"
             }), 400
         
-        logger.info(f"評估 {len(predictions)} 組預測結果")
+        if not actual_numbers:
+            return jsonify({
+                'status': 'error',
+                'message': "沒有提供實際號碼"
+            }), 400
         
         # 初始化評估器
-        try:
-            evaluator = LotteryEvaluator(output_dir=RESULTS_DIR)
-            logger.info("評估器初始化成功")
-        except Exception as e:
-            logger.error(f"初始化評估器時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"初始化評估器時出錯: {str(e)}"
-            }), 500
+        evaluator = LotteryEvaluator()
         
-        # 計算命中率
-        try:
-            hit_results = evaluator.calculate_hit_rate(predictions, actual_numbers)
-            logger.info("命中率計算完成")
-        except Exception as e:
-            logger.error(f"計算命中率時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"計算命中率時出錯: {str(e)}"
-            }), 500
-
-        # 獲取歷史數據
-        try:
-            fe = LotteryFeatureEngineering(DATA_PATH)
-            historical_data = fe.load_data()
-            logger.info(f"歷史數據載入成功，共 {len(historical_data)} 條記錄")
-        except Exception as e:
-            logger.error(f"載入歷史數據時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"載入歷史數據時出錯: {str(e)}"
-            }), 500
-
+        # 評估命中率
+        hit_results = evaluator.evaluate_hit_rate(predictions, actual_numbers)
+        
         # 生成評估報告
-        try:
-            report = evaluator.generate_evaluation_report(predictions, actual_numbers, historical_data)
-            logger.info("評估報告生成完成")
-        except Exception as e:
-            logger.error(f"生成評估報告時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"生成評估報告時出錯: {str(e)}"
-            }), 500
+        evaluation_report = evaluator.generate_evaluation_report(predictions, actual_numbers)
         
-        # 繪製圖表
-        try:
-            evaluator.plot_hit_distribution(predictions, actual_numbers)
-            # 移除對不存在方法的調用
-            # evaluator.plot_confusion_matrix(predictions, actual_numbers)
-            logger.info("圖表繪製完成")
-        except Exception as e:
-            logger.error(f"繪製圖表時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            # 繼續執行，不返回錯誤
+        logger.info(f"評估完成，平均命中率: {hit_results['avg_hit_rate']:.2f}")
         
-        logger.info("評估完成")
         return jsonify({
             'status': 'success',
             'hit_results': hit_results,
-            'evaluation_report': report
+            'evaluation_report': evaluation_report
         })
     
     except Exception as e:
-        logger.error(f"評估過程中發生未處理的錯誤: {str(e)}")
+        logger.error(f"評估預測結果時出錯: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({
             'status': 'error',
-            'message': str(e)
+            'message': f"評估預測結果時出錯: {str(e)}"
         }), 500
 
 @app.route('/optimize', methods=['POST'])
-def optimize_parameters():
-    """尋找最佳參數"""
+def optimize():
+    """優化參數"""
     try:
-        logger.info("開始尋找最佳參數...")
-        # 獲取請求數據
+        global optimization_progress, current_study
+        
         data = request.json
-        n_trials = data.get('n_trials', 10)
-        model_name = data.get('model_name', 'ensemble')  # 添加默認模型名稱
+        model_name = data.get('model_name')
+        n_trials = data.get('n_trials', 50)
+        actual_numbers = data.get('actual_numbers', [])
         
-        # 檢查數據文件是否存在
-        if not os.path.exists(DATA_PATH):
-            logger.error(f"數據文件不存在: {DATA_PATH}")
-            return jsonify({
-                'status': 'error',
-                'message': f"數據文件不存在: {DATA_PATH}"
-            }), 400
+        # 重置優化進度
+        optimization_progress = {
+            'progress': 0,
+            'status': '準備優化...',
+            'completed': False,
+            'cancelled': False
+        }
         
-        # 載入並處理數據
-        logger.info("載入並處理數據...")
-        try:
-            fe = LotteryFeatureEngineering(DATA_PATH)
-            lottery_data = fe.load_data()
-            features = fe.create_complex_features()
-            logger.info("數據處理完成")
-        except Exception as e:
-            logger.error(f"處理數據時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"處理數據時出錯: {str(e)}"
-            }), 500
+        logger.info(f"開始優化參數，模型: {model_name}, 試驗次數: {n_trials}")
+        
+        # 載入特徵工程器
+        fe = LotteryFeatureEngineering(DATA_PATH)
         
         # 準備訓練數據
-        logger.info("準備訓練數據...")
-        try:
-            X, y = fe.get_training_data()
-            logger.info("訓練數據準備完成")
-        except Exception as e:
-            logger.error(f"準備訓練數據時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"準備訓練數據時出錯: {str(e)}"
-            }), 500
+        X, y = fe.get_training_data()
         
         # 初始化模型訓練器
-        logger.info("初始化模型訓練器...")
-        try:
-            trainer = LotteryModelTrainer(X, y, model_dir=MODEL_DIR)
-            logger.info("模型訓練器初始化成功")
-        except Exception as e:
-            logger.error(f"初始化模型訓練器時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"初始化模型訓練器時出錯: {str(e)}"
-            }), 500
+        trainer = LotteryModelTrainer(X, y, model_dir=MODEL_DIR)
         
         # 分割訓練集和測試集
-        logger.info("分割訓練集和測試集...")
-        try:
-            X_train, X_test, y_train, y_test = trainer.train_test_split()
-            logger.info("數據分割完成")
-        except Exception as e:
-            logger.error(f"分割數據時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"分割數據時出錯: {str(e)}"
-            }), 500
+        X_train, X_test, y_train, y_test = trainer.train_test_split()
         
-        # 使用Optuna進行超參數優化
-        logger.info(f"開始使用Optuna進行超參數優化，模型: {model_name}，試驗次數: {n_trials}...")
-        try:
-            result = trainer.optimize_hyperparameters(model_name, n_trials)
-            if isinstance(result, tuple) and len(result) == 3:
-                best_params, best_score, best_model_name = result
+        # 如果指定了模型名稱，則優化該模型
+        if model_name:
+            # 創建優化研究
+            study = optuna.create_study(direction='minimize')
+            current_study = study
+            
+            # 定義回調函數來更新進度
+            def callback(study, trial):
+                global optimization_progress
+                progress = int((trial.number + 1) / n_trials * 100)
+                optimization_progress['progress'] = min(progress, 99)  # 保留最後1%給最終處理
+                
+                # 檢查是否應該取消優化
+                if optimization_progress['cancelled']:
+                    study.stop()
+            
+            # 優化參數
+            best_params, best_score, best_model = trainer.optimize_hyperparameters(
+                model_name=model_name, 
+                n_trials=n_trials
+            )
+            
+            # 更新優化進度
+            optimization_progress['progress'] = 100
+            optimization_progress['completed'] = True
+            
+            logger.info(f"參數優化完成，最佳模型: {best_model}, 最佳分數: {best_score:.4f}")
+            
+            return jsonify({
+                'status': 'success',
+                'best_model': best_model,
+                'best_params': best_params,
+                'best_score': best_score
+            })
+        
+        # 如果提供了實際號碼，則優化預測結果
+        elif actual_numbers:
+            # 獲取最新數據作為預測輸入
+            X_new = fe.get_latest_features()
+            
+            # 初始化評估器
+            evaluator = LotteryEvaluator()
+            
+            # 測試不同模型
+            models_to_test = ['random_forest', 'xgboost', 'lightgbm', 'catboost', 'neural_network', 'ensemble']
+            best_hit_rate = 0
+            best_model = None
+            best_predictions = None
+            
+            for i, model in enumerate(models_to_test):
+                try:
+                    # 更新進度
+                    progress = int((i + 1) / len(models_to_test) * 100)
+                    optimization_progress['progress'] = min(progress, 99)
+                    optimization_progress['status'] = f'測試模型: {model}'
+                    
+                    # 檢查是否應該取消優化
+                    if optimization_progress['cancelled']:
+                        break
+                    
+                    # 生成預測
+                    predictions = []
+                    for _ in range(10):  # 生成10組預測
+                        pred_set = trainer.generate_lottery_numbers(X_new, model_name=model)
+                        predictions.append(pred_set)
+                    
+                    # 評估命中率
+                    hit_results = evaluator.evaluate_hit_rate(predictions, actual_numbers)
+                    hit_rate = hit_results['avg_hit_rate']
+                    
+                    logger.info(f"模型 {model} 的命中率: {hit_rate:.4f}")
+                    
+                    # 更新最佳模型
+                    if hit_rate > best_hit_rate:
+                        best_hit_rate = hit_rate
+                        best_model = model
+                        best_predictions = predictions
+                
+                except Exception as e:
+                    logger.error(f"測試模型 {model} 時出錯: {str(e)}")
+                    logger.error(traceback.format_exc())
+            
+            # 如果找到了最佳模型
+            if best_model:
+                # 保存最佳參數
+                optimal_params = {
+                    'model_name': best_model,
+                    'hit_rate': best_hit_rate,
+                    'predictions': best_predictions
+                }
+                
+                params_path = trainer.save_optimal_parameters(best_model, {}, best_hit_rate)
+                
+                # 更新優化進度
+                optimization_progress['progress'] = 100
+                optimization_progress['completed'] = True
+                
+                logger.info(f"優化完成，最佳模型: {best_model}, 命中率: {best_hit_rate:.4f}")
+                
+                return jsonify({
+                    'status': 'success',
+                    'optimal_params': optimal_params
+                })
             else:
-                best_params, best_score, best_model_name = result, None, model_name
-            logger.info(f"超參數優化完成，最佳模型: {best_model_name}, 最佳參數: {best_params}")
-        except Exception as e:
-            logger.error(f"超參數優化時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
+                return jsonify({
+                    'status': 'error',
+                    'message': "未找到有效的模型"
+                }), 400
+        
+        else:
             return jsonify({
                 'status': 'error',
-                'message': f"超參數優化時出錯: {str(e)}"
-            }), 500
-        
-        # 使用最佳參數訓練模型
-        logger.info(f"使用最佳參數訓練 {best_model_name} 模型...")
-        try:
-            trainer.train_model_with_params(best_model_name, best_params)
-            logger.info(f"{best_model_name} 模型訓練完成")
-        except Exception as e:
-            logger.error(f"使用最佳參數訓練模型時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"使用最佳參數訓練模型時出錯: {str(e)}"
-            }), 500
-        
-        # 評估最佳模型
-        logger.info("評估最佳模型...")
-        try:
-            evaluation_results = trainer.evaluate_model(best_model_name, X_test, y_test)
-            logger.info("模型評估完成")
-        except Exception as e:
-            logger.error(f"評估模型時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"評估模型時出錯: {str(e)}"
-            }), 500
-        
-        # 保存最佳參數
-        logger.info("保存最佳參數...")
-        try:
-            trainer.save_optimal_parameters(best_model_name, best_params, best_score)
-            logger.info("最佳參數保存完成")
-        except Exception as e:
-            logger.error(f"保存最佳參數時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"保存最佳參數時出錯: {str(e)}"
-            }), 500
-        
-        logger.info("參數優化完成")
-        return jsonify({
-            'status': 'success',
-            'best_model': best_model_name,
-            'best_score': best_score,
-            'best_params': best_params,
-            'evaluation_results': evaluation_results
-        })
+                'message': "請提供模型名稱或實際號碼"
+            }), 400
     
     except Exception as e:
-        logger.error(f"參數優化過程中發生未處理的錯誤: {str(e)}")
+        logger.error(f"優化參數時出錯: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({
             'status': 'error',
-            'message': str(e)
+            'message': f"優化參數時出錯: {str(e)}"
         }), 500
 
-@app.route('/update_data', methods=['POST'])
-def update_data():
-    """更新數據集"""
+@app.route('/stop_optimization', methods=['POST'])
+def stop_optimization():
+    """終止優化過程"""
     try:
-        logger.info("開始更新數據集...")
+        global current_study, optimization_progress
         
-        # 獲取請求數據
-        data = request.json
-        new_data = data.get('new_data', [])
-        
-        if not new_data:
-            logger.error("缺少新數據")
+        if current_study:
+            current_study.stop()
+            optimization_progress['cancelled'] = True
+            logger.info("已發送終止優化請求")
+            
+            return jsonify({
+                'status': 'success',
+                'message': '已發送終止優化請求'
+            })
+        else:
             return jsonify({
                 'status': 'error',
-                'message': "缺少新數據"
+                'message': '沒有正在進行的優化'
             }), 400
-        
-        logger.info(f"收到 {len(new_data)} 條新數據")
-        
-        # 檢查數據文件是否存在
-        if not os.path.exists(DATA_PATH):
-            logger.warning(f"數據文件不存在，將創建新文件: {DATA_PATH}")
-            # 創建目錄
-            os.makedirs(os.path.dirname(DATA_PATH), exist_ok=True)
-            
-            # 創建新的數據文件
-            try:
-                df = pd.DataFrame(new_data)
-                df.to_csv(DATA_PATH, index=False)
-                logger.info(f"創建新數據文件成功: {DATA_PATH}")
-            except Exception as e:
-                logger.error(f"創建新數據文件時出錯: {str(e)}")
-                logger.error(traceback.format_exc())
-                return jsonify({
-                    'status': 'error',
-                    'message': f"創建新數據文件時出錯: {str(e)}"
-                }), 500
-        else:
-            # 更新現有數據文件
-            try:
-                # 讀取現有數據
-                existing_data = pd.read_csv(DATA_PATH)
-                logger.info(f"讀取現有數據成功，共 {len(existing_data)} 條記錄")
-                
-                # 將新數據轉換為DataFrame
-                new_df = pd.DataFrame(new_data)
-                
-                # 合併數據
-                updated_data = pd.concat([existing_data, new_df], ignore_index=True)
-                
-                # 去除重複項
-                updated_data = updated_data.drop_duplicates()
-                
-                # 保存更新後的數據
-                updated_data.to_csv(DATA_PATH, index=False)
-                logger.info(f"數據更新成功，現有 {len(updated_data)} 條記錄")
-            except Exception as e:
-                logger.error(f"更新數據文件時出錯: {str(e)}")
-                logger.error(traceback.format_exc())
-                return jsonify({
-                    'status': 'error',
-                    'message': f"更新數據文件時出錯: {str(e)}"
-                }), 500
-        
-        logger.info("數據集更新完成")
-        return jsonify({
-            'status': 'success',
-            'message': "數據集更新成功"
-        })
     
     except Exception as e:
-        logger.error(f"更新數據集過程中發生未處理的錯誤: {str(e)}")
+        logger.error(f"終止優化時出錯: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({
             'status': 'error',
-            'message': str(e)
+            'message': f"終止優化時出錯: {str(e)}"
         }), 500
+
+@app.route('/optimization_progress', methods=['GET'])
+def get_optimization_progress():
+    """獲取優化進度"""
+    global optimization_progress
+    return jsonify(optimization_progress)
 
 @app.route('/data', methods=['GET'])
-def get_data():
+def get_data_summary():
     """獲取數據摘要"""
     try:
-        logger.info("開始獲取數據摘要...")
+        logger.info("獲取數據摘要...")
         
-        # 檢查數據文件是否存在
-        if not os.path.exists(DATA_PATH):
-            logger.error(f"數據文件不存在: {DATA_PATH}")
-            return jsonify({
-                'status': 'error',
-                'message': f"數據文件不存在: {DATA_PATH}"
-            }), 400
+        # 載入特徵工程器
+        fe = LotteryFeatureEngineering(DATA_PATH)
         
         # 載入數據
-        try:
-            fe = LotteryFeatureEngineering(DATA_PATH)
-            data = fe.load_data()
-            logger.info(f"數據載入成功，共 {len(data)} 條記錄")
-        except Exception as e:
-            logger.error(f"載入數據時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"載入數據時出錯: {str(e)}"
-            }), 500
+        data = fe.load_data()
         
-        # 獲取數據摘要
-        summary = {}
-        for col in data.columns:
-            if col.startswith('num'):  # 只處理號碼列
-                col_data = data[col].dropna()
-                summary[col] = {
-                    'min': int(col_data.min()),
-                    'max': int(col_data.max()),
-                    'mean': col_data.mean(),
-                    'median': int(col_data.median()),
-                    'std': col_data.std(),
-                    'most_frequent': int(col_data.value_counts().index[0])
-                }
+        # 基本統計信息
+        total_records = len(data)
         
-        # 獲取最近的記錄
-        recent_records = data.head(10).to_dict('records')
+        # 獲取熱門號碼和冷門號碼
+        number_counts = {}
+        for _, row in data.iterrows():
+            # 從 num1 到 num5 列獲取號碼
+            numbers = []
+            for col in ['num1', 'num2', 'num3', 'num4', 'num5']:
+                if col in row.index and not pd.isna(row[col]):
+                    numbers.append(int(row[col]))
+            
+            for num in numbers:
+                if num in number_counts:
+                    number_counts[num] += 1
+                else:
+                    number_counts[num] = 1
         
-        # 獲取最近的開獎號碼
+        # 排序號碼頻率
+        sorted_numbers = sorted(number_counts.items(), key=lambda x: x[1], reverse=True)
+        
+        # 獲取前10個熱門號碼和後10個冷門號碼
+        hot_numbers = [num for num, _ in sorted_numbers[:10]]
+        cold_numbers = [num for num, _ in sorted_numbers[-10:]]
+        
+        # 獲取最近10次開獎結果
         recent_draws = []
-        for _, draw in data.head(10).iterrows():
-            # 只處理號碼列，跳過日期列
-            numbers = [int(draw[col]) for col in data.columns if col.startswith('num') and pd.notna(draw[col])]
-            if numbers:
-                recent_draws.append(numbers)
+        for _, row in data.iloc[-10:].iterrows():
+            numbers = []
+            for col in ['num1', 'num2', 'num3', 'num4', 'num5']:
+                if col in row.index and not pd.isna(row[col]):
+                    numbers.append(int(row[col]))
+            recent_draws.append(numbers)
         
-        # 獲取熱門和冷門號碼
-        all_numbers = []
-        for col in data.columns:
-            if col.startswith('num'):
-                all_numbers.extend(data[col].dropna().astype(int).tolist())
-        
-        number_counts = pd.Series(all_numbers).value_counts()
-        hot_numbers = number_counts.head(10).index.tolist()
-        cold_numbers = number_counts.tail(10).index.tolist()
-        
-        # 獲取號碼頻率
+        # 計算號碼頻率
+        total_draws = len(data)
         number_frequencies = []
-        for num in range(1, 50):  # 假設彩票號碼範圍是1-49
-            count = (number_counts.get(num, 0))
-            percentage = (count / len(all_numbers)) * 100
+        for num in range(1, 50):  # 假設號碼範圍是1-49
+            count = number_counts.get(num, 0)
+            percentage = (count / total_draws) * 100
             number_frequencies.append({
                 'number': num,
-                'count': int(count),
+                'count': count,
                 'percentage': percentage
             })
         
+        logger.info("數據摘要獲取成功")
+        
         return jsonify({
             'status': 'success',
-            'total_records': len(data),
-            'summary': summary,
-            'recent_records': recent_records,
-            'recent_draws': recent_draws,
+            'total_records': total_records,
             'hot_numbers': hot_numbers,
             'cold_numbers': cold_numbers,
+            'recent_draws': recent_draws,
             'number_frequencies': number_frequencies
         })
     
     except Exception as e:
-        logger.error(f"獲取數據摘要過程中發生未處理的錯誤: {str(e)}")
+        logger.error(f"獲取數據摘要時出錯: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({
             'status': 'error',
-            'message': str(e)
+            'message': f"獲取數據摘要時出錯: {str(e)}"
         }), 500
 
 @app.route('/advanced_analysis', methods=['GET'])
 def advanced_analysis():
-    """進行高級分析"""
+    """執行高級數據分析"""
     try:
-        logger.info("開始進行高級分析...")
+        logger.info("執行高級數據分析...")
         
-        # 檢查數據文件是否存在
-        if not os.path.exists(DATA_PATH):
-            logger.error(f"數據文件不存在: {DATA_PATH}")
-            return jsonify({
-                'status': 'error',
-                'message': f"數據文件不存在: {DATA_PATH}"
-            }), 400
+        # 載入特徵工程器
+        fe = LotteryFeatureEngineering(DATA_PATH)
         
         # 載入數據
-        try:
-            fe = LotteryFeatureEngineering(DATA_PATH)
-            data = fe.load_data()
-            logger.info(f"數據載入成功，共 {len(data)} 條記錄")
-        except Exception as e:
-            logger.error(f"載入數據時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"載入數據時出錯: {str(e)}"
-            }), 500
+        data = fe.load_data()
         
-        # 分析奇偶比例
-        odd_even_analysis = {}
-        # 分析高低比例
-        high_low_analysis = {}
-        # 分析和值分佈
-        sum_distribution = {}
-        # 分析間距分佈
-        gap_distribution = {}
-        # 分析連號情況
-        consecutive_analysis = {}
+        # 相關性分析
+        correlations = fe.analyze_correlations()
         
-        # 進行奇偶分析
-        try:
-            all_draws = []
-            for i in range(len(data)):
-                row = data.iloc[i]
-                # 假設號碼在前6列
-                numbers = [int(n) for n in row[:6] if pd.notna(n)]
-                all_draws.append(numbers)
-            
-            # 計算每組號碼的奇偶比例
-            odd_counts = []
-            for draw in all_draws:
-                odd_count = sum(1 for num in draw if num % 2 == 1)
-                odd_counts.append(odd_count)
-            
-            # 統計各種奇偶比例的頻率
-            for i in range(7):  # 0到6個奇數
-                count = odd_counts.count(i)
-                odd_even_analysis[f"{i}奇{6-i}偶"] = {
-                    'count': count,
-                    'percentage': (count / len(all_draws)) * 100
-                }
-            
-            # 計算每組號碼的高低比例 (假設1-24為低，25-49為高)
-            high_counts = []
-            for draw in all_draws:
-                high_count = sum(1 for num in draw if num >= 25)
-                high_counts.append(high_count)
-            
-            # 統計各種高低比例的頻率
-            for i in range(7):  # 0到6個高號
-                count = high_counts.count(i)
-                high_low_analysis[f"{i}高{6-i}低"] = {
-                    'count': count,
-                    'percentage': (count / len(all_draws)) * 100
-                }
-            
-            # 計算每組號碼的和值
-            sums = [sum(draw) for draw in all_draws]
-            
-            # 將和值分組
-            sum_ranges = [(60, 149), (150, 159), (160, 169), (170, 179), 
-                          (180, 189), (190, 199), (200, 209), (210, 219), 
-                          (220, 229), (230, 239), (240, 300)]
-            
-            for low, high in sum_ranges:
-                count = sum(1 for s in sums if low <= s <= high)
-                sum_distribution[f"{low}-{high}"] = {
-                    'count': count,
-                    'percentage': (count / len(all_draws)) * 100
-                }
-            
-            # 計算每組號碼的間距
-            gaps = []
-            for draw in all_draws:
-                sorted_draw = sorted(draw)
-                draw_gaps = [sorted_draw[i+1] - sorted_draw[i] for i in range(len(sorted_draw)-1)]
-                gaps.extend(draw_gaps)
-            
-            # 統計間距分佈
-            for gap in range(1, 11):
-                count = gaps.count(gap)
-                gap_distribution[str(gap)] = {
-                    'count': count,
-                    'percentage': (count / len(gaps)) * 100
-                }
-            
-            # 分析連號情況
-            consecutive_counts = []
-            for draw in all_draws:
-                sorted_draw = sorted(draw)
-                consecutive_count = 0
-                for i in range(len(sorted_draw)-1):
-                    if sorted_draw[i+1] - sorted_draw[i] == 1:
-                        consecutive_count += 1
-                consecutive_counts.append(consecutive_count)
-            
-            # 統計各種連號數量的頻率
-            for i in range(6):  # 0到5個連號
-                count = consecutive_counts.count(i)
-                consecutive_analysis[str(i)] = {
-                    'count': count,
-                    'percentage': (count / len(all_draws)) * 100
-                }
-            
-        except Exception as e:
-            logger.error(f"進行高級分析時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error',
-                'message': f"進行高級分析時出錯: {str(e)}"
-            }), 500
+        # 週期性分析
+        periodicity = fe.analyze_periodicity()
         
-        logger.info("高級分析完成")
+        # 趨勢分析
+        trends = fe.analyze_trends()
+        
+        logger.info("高級數據分析完成")
+        
         return jsonify({
             'status': 'success',
-            'odd_even_analysis': odd_even_analysis,
-            'high_low_analysis': high_low_analysis,
-            'sum_distribution': sum_distribution,
-            'gap_distribution': gap_distribution,
-            'consecutive_analysis': consecutive_analysis
+            'correlations': correlations,
+            'periodicity': periodicity,
+            'trends': trends
         })
     
     except Exception as e:
-        logger.error(f"高級分析過程中發生未處理的錯誤: {str(e)}")
+        logger.error(f"執行高級數據分析時出錯: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({
             'status': 'error',
-            'message': str(e)
+            'message': f"執行高級數據分析時出錯: {str(e)}"
         }), 500
 
-@app.route('/diversity_score', methods=['POST'])
-def calculate_diversity_score():
-    """計算多樣性分數"""
+@app.route('/diversity_settings', methods=['POST'])
+def set_diversity_settings():
+    """設置多樣性參數"""
     try:
-        # 獲取請求數據
+        data = request.json
+        method = data.get('method', 'hybrid')
+        level = data.get('level', 0.2)
+        
+        logger.info(f"設置多樣性參數: method={method}, level={level}")
+        
+        # 設置 cookie
+        response = jsonify({
+            'status': 'success',
+            'message': '多樣性設置已保存'
+        })
+        
+        response.set_cookie('diversityMethod', method)
+        response.set_cookie('diversityLevel', str(level))
+        
+        return response
+    
+    except Exception as e:
+        logger.error(f"設置多樣性參數時出錯: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'status': 'error',
+            'message': f"設置多樣性參數時出錯: {str(e)}"
+        }), 500
+
+@app.route('/upload_data', methods=['POST'])
+def upload_data():
+    """上傳數據文件"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({
+                'status': 'error',
+                'message': '沒有上傳文件'
+            }), 400
+        
+        file = request.files['file']
+        
+        if file.filename == '':
+            return jsonify({
+                'status': 'error',
+                'message': '沒有選擇文件'
+            }), 400
+        
+        # 檢查文件類型
+        if not (file.filename.endswith('.xlsx') or file.filename.endswith('.csv')):
+            return jsonify({
+                'status': 'error',
+                'message': '只支持 Excel 或 CSV 文件'
+            }), 400
+        
+        # 保存文件
+        file_path = os.path.join(BASE_DIR, 'data', 'uploaded_data.xlsx')
+        file.save(file_path)
+        
+        logger.info(f"數據文件上傳成功: {file_path}")
+        
+        # 嘗試載入數據
+        try:
+            fe = LotteryFeatureEngineering(file_path)
+            data = fe.load_data()
+            total_records = len(data)
+            
+            logger.info(f"成功載入 {total_records} 條記錄")
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'數據文件上傳成功，共 {total_records} 條記錄',
+                'total_records': total_records
+            })
+        
+        except Exception as e:
+            logger.error(f"載入上傳的數據文件時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+            
+            return jsonify({
+                'status': 'error',
+                'message': f'數據文件格式錯誤: {str(e)}'
+            }), 400
+    
+    except Exception as e:
+        logger.error(f"上傳數據文件時出錯: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'status': 'error',
+            'message': f"上傳數據文件時出錯: {str(e)}"
+        }), 500
+
+@app.route('/download_predictions', methods=['POST'])
+def download_predictions():
+    """下載預測結果"""
+    try:
         data = request.json
         predictions = data.get('predictions', [])
         
         if not predictions:
             return jsonify({
                 'status': 'error',
-                'message': "缺少預測結果"
+                'message': '沒有預測結果可下載'
             }), 400
         
-        # 計算組內多樣性
-        intra_set_diversity = diversity_enhancer.calculate_intra_set_diversity(predictions)
+        # 創建 DataFrame
+        rows = []
+        for i, pred_set in enumerate(predictions):
+            for j, numbers in enumerate(pred_set):
+                rows.append({
+                    'set': i + 1,
+                    'row': j + 1,
+                    'numbers': ', '.join(map(str, numbers))
+                })
         
-        # 計算組間多樣性
-        inter_set_diversity = diversity_enhancer.calculate_inter_set_diversity(predictions)
+        df = pd.DataFrame(rows)
         
-        # 計算綜合分數
-        composite_score = (intra_set_diversity + inter_set_diversity) / 2
+        # 生成文件名
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'predictions_{timestamp}.xlsx'
+        file_path = os.path.join(RESULTS_DIR, filename)
         
+        # 保存為 Excel 文件
+        df.to_excel(file_path, index=False)
+        
+        logger.info(f"預測結果已保存至: {file_path}")
+        
+        # 返回文件下載鏈接
         return jsonify({
             'status': 'success',
-            'diversity_score': {
-                'intra_set_diversity': intra_set_diversity,
-                'inter_set_diversity': inter_set_diversity
-            },
-            'composite_score': composite_score
+            'message': '預測結果已準備好下載',
+            'download_url': f'/download/{filename}'
         })
+    
     except Exception as e:
+        logger.error(f"下載預測結果時出錯: {str(e)}")
+        logger.error(traceback.format_exc())
         return jsonify({
             'status': 'error',
-            'message': str(e)
+            'message': f"下載預測結果時出錯: {str(e)}"
         }), 500
 
-@app.route('/optimize', methods=['POST'])
-def optimize():
+@app.route('/download/<filename>')
+def download_file(filename):
+    """下載文件"""
     try:
-        data = request.json
-        trials = data.get('trials', 100)
-        actual_numbers = data.get('actual_numbers', [])
-        
-        if not actual_numbers:
-            return jsonify({
-                'status': 'error',
-                'message': '請提供實際開獎號碼進行優化'
-            }), 400
-        
-        # 模擬優化過程
-        # 在實際應用中，這裡應該有真正的參數優化邏輯
-        
-        # 模擬進度更新
-        progress_updates = []
-        for i in range(1, 6):
-            progress = i * 20
-            progress_updates.append({
-                'progress': progress,
-                'message': f'優化進度: {progress}%',
-                'current_best_score': 0.5 + (i * 0.1)
-            })
-        
-        # 模擬最佳參數
-        best_params = {
-            'random_forest': {
-                'n_estimators': 200,
-                'max_depth': 10,
-                'min_samples_split': 5
-            },
-            'xgboost': {
-                'n_estimators': 150,
-                'learning_rate': 0.1,
-                'max_depth': 8
-            },
-            'lightgbm': {
-                'n_estimators': 180,
-                'learning_rate': 0.08,
-                'num_leaves': 31
-            },
-            'catboost': {
-                'iterations': 200,
-                'learning_rate': 0.05,
-                'depth': 6
-            },
-            'neural_network': {
-                'hidden_layers': 2,
-                'neurons_per_layer': 64,
-                'dropout_rate': 0.2
-            },
-            'ensemble': {
-                'weights': {
-                    'random_forest': 0.25,
-                    'xgboost': 0.3,
-                    'lightgbm': 0.2,
-                    'catboost': 0.15,
-                    'neural_network': 0.1
-                }
-            }
-        }
-        
-        # 使用最佳參數生成預測
-        predictions = []
-        for _ in range(5):
-            # 生成一組預測號碼 (1-49)
-            numbers = sorted(random.sample(range(1, 50), 6))
-            predictions.append(numbers)
-        
-        return jsonify({
-            'status': 'success',
-            'progress_updates': progress_updates,
-            'best_params': best_params,
-            'optimized_predictions': predictions
-        })
+        return send_from_directory(RESULTS_DIR, filename, as_attachment=True)
     except Exception as e:
+        logger.error(f"下載文件時出錯: {str(e)}")
+        logger.error(traceback.format_exc())
         return jsonify({
             'status': 'error',
-            'message': str(e)
+            'message': f"下載文件時出錯: {str(e)}"
         }), 500
 
 if __name__ == '__main__':
