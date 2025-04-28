@@ -24,7 +24,7 @@ from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
 import matplotlib
 from datetime import datetime
 import json
-# 設置 Keras 後端為 TensorFlow
+# 設定 Keras 後端為 TensorFlow
 os.environ["KERAS_BACKEND"] = "tensorflow"
 matplotlib.use('Agg')  # 使用非互動式後端，避免 Tkinter 問題
 
@@ -245,7 +245,7 @@ class LotteryModelTrainer:
             if hasattr(self, 'should_stop') and self.should_stop:
                 break
                 
-            # 使用函數式 API 創建模型
+            # 使用函式式 API 建立模型
             inputs = keras.Input(shape=(self.X_train.shape[1],))
             x = Dense(neurons, activation='relu')(inputs)
             x = Dropout(dropout)(x)
@@ -258,7 +258,7 @@ class LotteryModelTrainer:
             # 輸出層
             outputs = Dense(1)(x)
             
-            # 創建模型
+            # 建立模型
             model = keras.Model(inputs=inputs, outputs=outputs)
             
             # 編譯模型
@@ -450,7 +450,7 @@ class LotteryModelTrainer:
         # 確保 X_new 是正確的格式
         if not isinstance(X_new, pd.DataFrame) and self.feature_names:
             # 如果不是 DataFrame 但我們有特徵名稱，則轉換為 DataFrame
-            X_new = pd.DataFrame([X_new] if np.array(X_new).ndim == 1 else X_new, 
+            X_new = pd.DataFrame([X_new] if np.array(X_new).ndim == 1 else X_new,
                                 columns=self.feature_names)
         elif isinstance(X_new, pd.DataFrame):
             # 如果是 DataFrame，確保列名與特徵名稱一致
@@ -486,8 +486,14 @@ class LotteryModelTrainer:
                 else:  # random_forest
                     pred = models.predict(X_new)[0][i]
                 
-                # 將預測值轉換為1-49之間的整數
-                num = max(1, min(49, int(round(pred))))
+                # 將預測值轉換為1-49之間的整數，新增一些隨機性
+                base_num = max(1, min(49, int(round(pred))))
+                # 有20%的機會選擇相鄰的數字
+                if random.random() < 0.2:
+                    offset = random.choice([-1, 1])
+                    num = max(1, min(49, base_num + offset))
+                else:
+                    num = base_num
                 
                 # 確保不重複
                 while num in numbers:
@@ -699,7 +705,7 @@ class LotteryModelTrainer:
             # 對每個目標列單獨訓練模型
             mse_fold = 0
             for i in range(y_train_fold.shape[1]):
-                # 使用函數式 API 建立模型
+                # 使用函式式 API 建立模型
                 inputs = keras.Input(shape=(X_train_fold.shape[1],))
                 x = Dense(neurons, activation='relu')(inputs)
                 x = Dropout(dropout)(x)
@@ -712,7 +718,7 @@ class LotteryModelTrainer:
                 # 輸出層
                 outputs = Dense(1)(x)
                 
-                # 創建模型
+                # 建立模型
                 model = keras.Model(inputs=inputs, outputs=outputs)
                 
                 # 編譯模型
@@ -786,12 +792,24 @@ class LotteryModelTrainer:
         
         return best_params, best_score, model_name
     
-    def save_optimal_parameters(self, model_name, params, hit_rate):
-        """儲存最佳引數"""
+    def save_optimal_parameters(self, model_name, params, hit_rate, best_score):
+        """儲存最佳引數
+        
+        引數:
+            model_name: 模型名稱
+            params: 模型引數
+            hit_rate: 命中率
+            best_score: 最佳分數 (MSE)
+        
+        返回:
+            引數儲存路徑
+        """
         optimal_params = {
             'model_name': model_name,
             'parameters': params,
-            'hit_rate': hit_rate
+            'hit_rate': hit_rate,
+            'best_score': best_score,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
         params_path = os.path.join(self.model_dir, 'optimal_parameters.json')
@@ -902,7 +920,7 @@ class LotteryModelTrainer:
                 if hasattr(self, 'should_stop') and self.should_stop:
                     break
                     
-                # 使用函數式 API 建立模型
+                # 使用函式式 API 建立模型
                 inputs = keras.Input(shape=(input_dim,))
                 x = Dense(neurons, activation='relu')(inputs)
                 x = Dropout(dropout)(x)
@@ -915,7 +933,7 @@ class LotteryModelTrainer:
                 # 輸出層
                 outputs = Dense(1)(x)
                 
-                # 創建模型
+                # 建立模型
                 model = keras.Model(inputs=inputs, outputs=outputs)
                 
                 # 編譯模型

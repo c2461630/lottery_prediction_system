@@ -6,6 +6,36 @@
     <title>彩球預測系統</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .sidebar {
+            background-color: #f8f9fa;
+            padding: 20px;
+            height: 100vh;
+            position: sticky;
+            top: 0;
+            overflow-y: auto;
+        }
+        
+        .main-content {
+            padding: 20px;
+        }
+        
+        .prediction-card.border-success {
+            box-shadow: 0 0 10px rgba(40, 167, 69, 0.5);
+        }
+        
+        .prediction-card.border-success .card-header {
+            background-color: rgba(40, 167, 69, 0.1);
+        }
+        
+        .number-ball {
+            transition: transform 0.2s;
+        }
+        
+        .prediction-numbers:hover .number-ball {
+            transform: scale(1.1);
+        }
+    </style>
 </head>
 <body>
     <div class="container-fluid">
@@ -19,7 +49,8 @@
                         <div class="control-group mb-3">
                             <h5>模型操作</h5>
                             <button id="trainModelBtn" class="btn btn-primary w-100 mb-2">訓練模型</button>
-                            <button id="predictBtn" class="btn btn-success w-100 mb-2">生成預測</button>
+                            <button id="quickPredictBtn" class="btn btn-success w-100 mb-2">快速預測</button>
+                            <button id="getBestSinglePrediction" class="btn btn-danger w-100 mb-2">最佳單一預測</button>
                             <button id="predictWithBestParamsBtn" class="btn btn-info w-100 mb-2">使用最佳參數預測</button>
                         </div>
                         
@@ -59,12 +90,28 @@
                     <div class="col-md-6">
                         <div class="card">
                             <div class="card-header">
-                                <h5>訓練模型</h5>
+                                <h5>高級訓練選項</h5>
                             </div>
                             <div class="card-body">
-                                <p>點擊下方按鈕開始訓練模型。這可能需要一些時間。</p>
+                                <div class="mb-3">
+                                    <label for="epochsSelect" class="form-label">訓練輪數</label>
+                                    <select id="epochsSelect" class="form-select">
+                                        <option value="10">10輪 (快速)</option>
+                                        <option value="50" selected>50輪 (標準)</option>
+                                        <option value="100">100輪 (深度)</option>
+                                        <option value="200">200輪 (完整)</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="batchSizeSelect" class="form-label">批次大小</label>
+                                    <select id="batchSizeSelect" class="form-select">
+                                        <option value="16">16 (節省記憶體)</option>
+                                        <option value="32" selected>32 (標準)</option>
+                                        <option value="64">64 (快速)</option>
+                                    </select>
+                                </div>
                                 <div class="d-flex gap-2">
-                                    <button id="trainBtn" class="btn btn-primary">訓練模型</button>
+                                    <button id="advancedTrainBtn" class="btn btn-primary">開始高級訓練</button>
                                     <button id="stopTrainBtn" class="btn btn-danger" disabled>終止訓練</button>
                                 </div>
                                 <div id="trainStatus" class="mt-3"></div>
@@ -96,6 +143,7 @@
                                 <div class="d-flex gap-2">
                                     <button id="generatePredictBtn" class="btn btn-success">生成預測</button>
                                     <button id="generateWithBestParams" class="btn btn-info">使用最佳參數預測</button>
+                                    <button id="getBestSinglePrediction" class="btn btn-danger">最佳單一預測</button>
                                 </div>
                             </div>
                         </div>
@@ -309,21 +357,54 @@
     </div>
 
     <!-- 訓練進度模態框 -->
-    <div class="modal fade" id="trainingProgressModal" tabindex="-1" aria-labelledby="trainingProgressModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal fade" id="trainingProgressModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-labelledby="trainingProgressModalLabel" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="trainingProgressModalLabel">模型訓練進度</h5>
                 </div>
                 <div class="modal-body">
+                    <p id="trainingCurrentModel">準備訓練...</p>
                     <div class="progress mb-3">
                         <div id="trainingProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
                     </div>
-                    <div id="trainingProgressText">準備訓練...</div>
-                    <div id="trainingCurrentModel" class="mt-2 text-muted"></div>
+                    <p id="trainingProgressText">初始化訓練環境...</p>
+                    <div class="alert alert-info">
+                        <small>訓練過程可能需要幾分鐘時間，請耐心等待。</small>
+                    </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-danger" id="cancelTrainingBtn">終止訓練</button>
+                    <button type="button" class="btn btn-danger" id="cancelTrainingBtn">取消訓練</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 快速預測模態框 -->
+    <div class="modal fade" id="quickPredictModal" tabindex="-1" aria-labelledby="quickPredictModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="quickPredictModalLabel">快速預測</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="quickPredictCount" class="form-label">生成組數</label>
+                        <input type="number" class="form-control" id="quickPredictCount" value="3" min="1" max="5">
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="useBestModel" checked>
+                            <label class="form-check-label" for="useBestModel">
+                                使用最佳模型
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-success" id="startQuickPredict">開始預測</button>
                 </div>
             </div>
         </div>

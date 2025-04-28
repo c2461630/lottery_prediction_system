@@ -9,7 +9,7 @@ class DiversityEnhancer:
     def __init__(self, diversity_degree=0.3):
         """初始化多樣性增強器
         
-        參數:
+        引數:
             diversity_degree: 多樣性程度 (0-1)
         """
         self.diversity_degree = diversity_degree
@@ -17,7 +17,7 @@ class DiversityEnhancer:
     def enhance_diversity(self, predictions, num_sets=None, method='hybrid'):
         """增強預測結果的多樣性
         
-        參數:
+        引數:
             predictions: 原始預測結果
             num_sets: 需要返回的預測集數量
             method: 多樣性增強方法 ('mutation', 'clustering', 'hybrid')
@@ -43,20 +43,21 @@ class DiversityEnhancer:
         temp_diversity_degree = self.diversity_degree
         if all_same:
             temp_diversity_degree = max(0.8, self.diversity_degree * 2)  # 更激進的多樣性增強
+            logger.warning(f"檢測到所有預測相同，增加多樣性程度至 {temp_diversity_degree}")
         
         if method == 'mutation':
-            enhanced = self._enhance_by_mutation(formatted_predictions, temp_diversity_degree)
+            enhanced = self._enhance_by_mutation(formatted_predictions, diversity_level=temp_diversity_degree, num_sets=num_sets)
         elif method == 'clustering':
-            enhanced = self._enhance_by_clustering(formatted_predictions)
+            enhanced = self._enhance_by_clustering(formatted_predictions, diversity_level=temp_diversity_degree)
         elif method == 'hybrid':
             # 先使用聚類，然後對結果進行變異
             clustered = self._enhance_by_clustering(formatted_predictions, diversity_level=temp_diversity_degree)
-            enhanced = self._enhance_by_mutation(clustered, diversity_level=temp_diversity_degree)
+            enhanced = self._enhance_by_mutation(clustered, diversity_level=temp_diversity_degree, num_sets=num_sets)
         else:
             logger.warning(f"未知的多樣性增強方法: {method}，使用原始預測")
             enhanced = formatted_predictions
         
-        # 如果指定了返回集數，則截取相應數量
+        # 如果指定了返回集數，則擷取相應數量
         if num_sets is not None and num_sets > 0:
             # 確保有足夠的預測集
             while len(enhanced) < num_sets:
@@ -70,7 +71,7 @@ class DiversityEnhancer:
                 random_set.sort()
                 enhanced.append([random_set])
             
-            # 截取指定數量
+            # 擷取指定數量
             if len(enhanced) > num_sets:
                 enhanced = enhanced[:num_sets]
         
@@ -119,7 +120,7 @@ class DiversityEnhancer:
                     forced_diverse.append(base_pred)  # 保留一個原始預測
                     continue
                     
-                # 為其他預測創建顯著不同的變體
+                # 為其他預測建立顯著不同的變體
                 new_pred = []
                 for numbers in base_pred:
                     new_numbers = list(numbers)
@@ -137,6 +138,9 @@ class DiversityEnhancer:
                 forced_diverse.append(new_pred)
             
             enhanced = forced_diverse
+        
+        # 列印增強後的預測結果，用於除錯
+        logger.debug(f"增強後的預測結果: {enhanced}")
         
         return enhanced
 
@@ -183,7 +187,7 @@ class DiversityEnhancer:
                 elif all(isinstance(x, list) for x in pred_set):
                     formatted.append(pred_set)
                 else:
-                    # 嘗試轉換混合類型
+                    # 嘗試轉換混合型別
                     new_set = []
                     for item in pred_set:
                         if isinstance(item, int):
@@ -209,7 +213,7 @@ class DiversityEnhancer:
             return []
     
     def _enhance_by_mutation(self, predictions, diversity_level=0.2, num_sets=None):
-        """通過變異增強多樣性"""
+        """透過變異增強多樣性"""
         if not predictions:
             return []
         
@@ -247,7 +251,7 @@ class DiversityEnhancer:
                     
                     # 變異選定的號碼
                     for pos in positions:
-                        # 生成一個不在當前組合中的新號碼
+                        # 生成一個不在當前組閤中的新號碼
                         available_numbers = [n for n in range(1, 50) if n not in new_numbers]
                         if available_numbers:
                             new_numbers[pos] = random.choice(available_numbers)
@@ -260,7 +264,7 @@ class DiversityEnhancer:
         return enhanced_predictions
     
     def _enhance_by_clustering(self, predictions, diversity_level=0.2, num_sets=None):
-        """通過聚類增強多樣性"""
+        """透過聚類增強多樣性"""
         if not predictions:
             return []
         
@@ -288,7 +292,7 @@ class DiversityEnhancer:
                     except:
                         numbers = [numbers]
                 
-                # 創建一個49維的向量，表示每個號碼是否被選中
+                # 建立一個49維的向量，表示每個號碼是否被選中
                 vector = np.zeros(49)
                 for num in numbers:
                     try:
@@ -309,7 +313,7 @@ class DiversityEnhancer:
             for _ in range(len(predictions)):
                 pred_set = []
                 for _ in range(len(predictions[0])):
-                    # 創建變異版本
+                    # 建立變異版本
                     new_numbers = list(base_numbers)
                     # 隨機變異2-3個號碼
                     mutation_count = random.randint(2, 3)
@@ -346,12 +350,12 @@ class DiversityEnhancer:
         
         # 確保我們有足夠的代表
         while len(representatives) < len(predictions) * len(predictions[0]):
-            # 添加一些隨機變異的代表
-            for rep in list(representatives):  # 使用副本避免無限循環
+            # 新增一些隨機變異的代表
+            for rep in list(representatives):  # 使用副本避免無限迴圈
                 if len(representatives) >= len(predictions) * len(predictions[0]):
                     break
                 
-                # 創建變異版本
+                # 建立變異版本
                 new_rep = list(rep)
                 # 變異多個位置以增加多樣性
                 mutation_count = random.randint(2, 3)
@@ -478,7 +482,7 @@ class DiversityEnhancer:
                     except:
                         numbers = [numbers]
                 
-                # 創建一個49維的向量，表示每個號碼是否被選中
+                # 建立一個49維的向量，表示每個號碼是否被選中
                 vector = np.zeros(49)
                 for num in numbers:
                     try:
@@ -500,7 +504,7 @@ class DiversityEnhancer:
         # 選擇距離最大的向量組合
         max_distance_indices = []
         
-        # 貪心算法：每次選擇與已選向量距離和最大的向量
+        # 貪心演算法：每次選擇與已選向量距離和最大的向量
         if len(vectors) > 0:
             max_distance_indices.append(0)  # 從第一個向量開始
             

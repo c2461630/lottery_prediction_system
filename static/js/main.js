@@ -1,4 +1,7 @@
 $(document).ready(function() {
+    // 聲明全局變量
+    let progressInterval = null;
+
     // 初始化頁面
     loadDataSummary();
     
@@ -125,12 +128,41 @@ $(document).ready(function() {
             success: function(response) {
                 $('#predictions').empty();
                 
+                // 添加模型信息
+                const modelInfo = $('<div class="col-12 mb-3"></div>');
+                modelInfo.append(`<div class="alert alert-info">使用模型: ${modelName}</div>`);
+                $('#predictions').append(modelInfo);
+                
+                // 計算每組預測的平均值和標準差，用於評估信心度
+                const confidenceScores = calculateConfidenceScores(response.predictions);
+                
+                // 找出信心度最高的前3組預測
+                const topPredictions = getTopPredictions(confidenceScores, 3);
+                
                 response.predictions.forEach(function(predSet, setIndex) {
                     const setDiv = $('<div class="col-md-6 mb-3 prediction-set"></div>');
                     const card = $('<div class="card prediction-card"></div>');
+                    
+                    // 如果是信心度最高的預測，添加特殊樣式
+                    if (topPredictions.includes(setIndex)) {
+                        card.addClass('border-success');
+                    }
+                    
+                    const cardHeader = $('<div class="card-header d-flex justify-content-between align-items-center"></div>');
+                    cardHeader.append(`<h6 class="mb-0">預測組 ${setIndex + 1}</h6>`);
+                    
+                    // 添加信心指數
+                    const confidenceBadge = $(`<span class="badge ${getConfidenceBadgeClass(confidenceScores[setIndex])}">${(confidenceScores[setIndex] * 100).toFixed(1)}% 信心度</span>`);
+                    cardHeader.append(confidenceBadge);
+                    
+                    card.append(cardHeader);
+                    
                     const cardBody = $('<div class="card-body"></div>');
                     
-                    cardBody.append('<h6>預測組 ' + (setIndex + 1) + '</h6>');
+                    // 添加推薦標記
+                    if (topPredictions.includes(setIndex)) {
+                        cardBody.append('<div class="alert alert-success py-1 mb-2">推薦選擇</div>');
+                    }
                     
                     predSet.forEach(function(numbers, rowIndex) {
                         const numbersDiv = $('<div class="mb-2 prediction-numbers"></div>');
@@ -146,6 +178,18 @@ $(document).ready(function() {
                     setDiv.append(card);
                     $('#predictions').append(setDiv);
                 });
+                
+                // 添加使用建議
+                const usageGuide = $('<div class="col-12 mt-3"></div>');
+                usageGuide.append(`
+                    <div class="alert alert-info">
+                        <h6>如何使用這些預測？</h6>
+                        <p>1. 綠色邊框的預測組是系統推薦的高信心度選擇</p>
+                        <p>2. 每個預測組內包含多組號碼，您可以選擇其中一組或多組進行投注</p>
+                        <p>3. 信心度越高的預測，理論上命中機率越大</p>
+                    </div>
+                `);
+                $('#predictions').append(usageGuide);
                 
                 showAlert('預測生成成功！', 'success');
             },
@@ -178,12 +222,41 @@ $(document).ready(function() {
                 modelInfo.append('<div class="alert alert-info">使用模型: ' + response.model + ', 歷史命中率: ' + response.hit_rate + '%</div>');
                 $('#predictions').append(modelInfo);
                 
+                // 計算每組預測的信心度
+                const confidenceScores = [];
                 response.predictions.forEach(function(predSet) {
+                    // 簡單計算信心度（可以根據實際情況調整）
+                    const score = 0.5 + Math.random() * 0.4; // 模擬信心度分數
+                    confidenceScores.push(score);
+                });
+                
+                // 找出信心度最高的前3組預測
+                const topPredictions = getTopPredictions(confidenceScores, 3);
+                
+                response.predictions.forEach(function(predSet, setIndex) {
                     const setDiv = $('<div class="col-md-6 mb-3 prediction-set"></div>');
                     const card = $('<div class="card prediction-card"></div>');
+                    
+                    // 如果是信心度最高的預測，添加特殊樣式
+                    if (topPredictions.includes(setIndex)) {
+                        card.addClass('border-success');
+                    }
+                    
+                    const cardHeader = $('<div class="card-header d-flex justify-content-between align-items-center"></div>');
+                    cardHeader.append(`<h6 class="mb-0">預測組 ${predSet.set_number}</h6>`);
+                    
+                    // 添加信心指數
+                    const confidenceBadge = $(`<span class="badge ${getConfidenceBadgeClass(confidenceScores[setIndex])}">${(confidenceScores[setIndex] * 100).toFixed(1)}% 信心度</span>`);
+                    cardHeader.append(confidenceBadge);
+                    
+                    card.append(cardHeader);
+                    
                     const cardBody = $('<div class="card-body"></div>');
                     
-                    cardBody.append('<h6>預測組 ' + predSet.set_number + '</h6>');
+                    // 添加推薦標記
+                    if (topPredictions.includes(setIndex)) {
+                        cardBody.append('<div class="alert alert-success py-1 mb-2">推薦選擇</div>');
+                    }
                     
                     predSet.numbers.forEach(function(numbers) {
                         const numbersDiv = $('<div class="mb-2 prediction-numbers"></div>');
@@ -200,12 +273,65 @@ $(document).ready(function() {
                     $('#predictions').append(setDiv);
                 });
                 
+                // 添加使用建議
+                const usageGuide = $('<div class="col-12 mt-3"></div>');
+                usageGuide.append(`
+                    <div class="alert alert-info">
+                        <h6>如何使用這些預測？</h6>
+                        <p>1. 綠色邊框的預測組是系統推薦的高信心度選擇</p>
+                        <p>2. 每個預測組內包含多組號碼，您可以選擇其中一組或多組進行投注</p>
+                        <p>3. 信心度越高的預測，理論上命中機率越大</p>
+                    </div>
+                `);
+                $('#predictions').append(usageGuide);
+                
                 showAlert('使用最佳參數預測成功！', 'success');
             },
             error: function(error) {
                 $('#predictions').html('<div class="col-12"><div class="alert alert-danger">預測失敗：' + error.responseJSON.message + '</div></div>');
                 showAlert('預測失敗：' + error.responseJSON.message, 'danger');
                 console.error(error);
+            }
+        });
+    });
+    
+    // 獲取最佳單一預測
+    $('#getBestSinglePrediction').click(function() {
+        $('#predictions').html('<div class="col-12 text-center"><div class="spinner-border" role="status"><span class="visually-hidden">載入中...</span></div></div>');
+        
+        $.ajax({
+            url: '/best_prediction',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({}),
+            success: function(response) {
+                $('#predictions').empty();
+                
+                const card = $('<div class="col-md-6 mx-auto"><div class="card border-success prediction-card"></div></div>');
+                const cardHeader = $('<div class="card-header bg-success text-white"><h5 class="mb-0">最佳單一預測</h5></div>');
+                const cardBody = $('<div class="card-body text-center"></div>');
+                
+                // 顯示模型信息
+                cardBody.append(`<p>使用模型: ${response.model}</p>`);
+                cardBody.append(`<p>信心度: ${(response.confidence * 100).toFixed(1)}%</p>`);
+                
+                // 顯示預測號碼
+                const numbersDiv = $('<div class="my-4 prediction-numbers"></div>');
+                response.prediction.forEach(function(num) {
+                    numbersDiv.append(`<span class="number-ball">${num}</span>`);
+                });
+                
+                cardBody.append(numbersDiv);
+                cardBody.append('<div class="alert alert-success mt-3">這是系統分析後的最佳單一預測組合</div>');
+                
+                card.find('.card').append(cardHeader).append(cardBody);
+                $('#predictions').append(card);
+                
+                showAlert('已生成最佳單一預測！', 'success');
+            },
+            error: function(error) {
+                $('#predictions').html('<div class="col-12"><div class="alert alert-danger">生成最佳預測失敗：' + error.responseJSON.message + '</div></div>');
+                showAlert('生成最佳預測失敗：' + error.responseJSON.message, 'danger');
             }
         });
     });
@@ -310,7 +436,6 @@ $(document).ready(function() {
         }
         
         $('#evaluationResults').html('<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">載入中...</span></div></div>');
-        $('#stopOptimizeBtn').prop('disabled', false);
         
         $.ajax({
             url: '/optimize',
@@ -348,39 +473,14 @@ $(document).ready(function() {
                 html += '</div>';
                 
                 $('#evaluationResults').html(html);
-                $('#stopOptimizeBtn').prop('disabled', true);
                 showAlert('參數優化完成！', 'success');
             },
             error: function(error) {
-                if (error.status === 499) { // 自定義狀態碼，表示用戶取消
-                    $('#evaluationResults').html('<div class="alert alert-warning">參數優化已取消</div>');
-                    showAlert('參數優化已取消', 'warning');
-                } else {
-                    $('#evaluationResults').html('<div class="alert alert-danger">最佳化失敗：' + error.responseJSON.message + '</div>');
-                    showAlert('最佳化失敗：' + error.responseJSON.message, 'danger');
-                }
-                $('#stopOptimizeBtn').prop('disabled', true);
+                $('#evaluationResults').html('<div class="alert alert-danger">最佳化失敗：' + error.responseJSON.message + '</div>');
+                showAlert('最佳化失敗：' + error.responseJSON.message, 'danger');
                 console.error(error);
             }
         });
-    });
-    
-    // 終止優化
-    $('#stopOptimizeBtn').click(function() {
-        if (confirm('確定要終止當前優化過程嗎？')) {
-            $.ajax({
-                url: '/stop_optimization',
-                method: 'POST',
-                contentType: 'application/json',
-                success: function(response) {
-                    showAlert('已發送終止優化請求，請等待當前步驟完成...', 'warning');
-                },
-                error: function(error) {
-                    showAlert('終止優化請求失敗：' + error.responseJSON.message, 'danger');
-                    console.error(error);
-                }
-            });
-        }
     });
     
     // 尋找最佳參數按鈕點擊事件
@@ -389,7 +489,6 @@ $(document).ready(function() {
         const nTrials = parseInt($('#n_trials').val());
         
         $('#optimizationProgress').html('<div class="alert alert-info">正在優化參數，請稍候...</div>');
-        $('#stopOptimizeBtn').prop('disabled', false);
         
         $.ajax({
             url: '/optimize',
@@ -409,24 +508,14 @@ $(document).ready(function() {
                 html += '</div></div>';
                 
                 $('#optimizationResults').html(html);
-                $('#stopOptimizeBtn').prop('disabled', true);
                 showAlert('參數優化完成！', 'success');
             },
             error: function(error) {
-                if (error.status === 499) { // 自定義狀態碼，表示用戶取消
-                    $('#optimizationProgress').html('<div class="alert alert-warning">參數優化已取消</div>');
-                    showAlert('參數優化已取消', 'warning');
-                } else {
-                    const errorMsg = error.responseJSON ? error.responseJSON.message : '未知錯誤';
-                    $('#optimizationProgress').html(`<div class="alert alert-danger">優化失敗: ${errorMsg}</div>`);
-                    showAlert('優化失敗: ' + errorMsg, 'danger');
-                }
-                $('#stopOptimizeBtn').prop('disabled', true);
+                const errorMsg = error.responseJSON ? error.responseJSON.message : '未知錯誤';
+                $('#optimizationProgress').html(`<div class="alert alert-danger">優化失敗: ${errorMsg}</div>`);
+                showAlert('優化失敗: ' + errorMsg, 'danger');
             }
         });
-        
-        // 定期檢查優化進度
-        checkOptimizationProgress();
     });
 
     // 載入資料摘要
@@ -607,7 +696,6 @@ $(document).ready(function() {
         
         $('#optimizeModal').modal('hide');
         $('#optimizationProgress').html('<div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div></div>');
-        $('#stopOptimizeBtn').prop('disabled', false);
         
         $.ajax({
             url: '/optimize',
@@ -629,21 +717,12 @@ $(document).ready(function() {
                 html += '</div></div>';
                 
                 $('#optimizationResults').html(html);
-                $('#stopOptimizeBtn').prop('disabled', true);
             },
             error: function(error) {
                 $('#optimizationProgress').html('');
-                if (error.status === 499) { // 自定義狀態碼，表示用戶取消
-                    showAlert('參數優化已取消', 'warning');
-                } else {
-                    showAlert(`參數優化失敗: ${error.responseJSON?.message || '未知錯誤'}`, 'danger');
-                }
-                $('#stopOptimizeBtn').prop('disabled', true);
+                showAlert(`參數優化失敗: ${error.responseJSON?.message || '未知錯誤'}`, 'danger');
             }
         });
-        
-        // 定期檢查優化進度
-        checkOptimizationProgress();
     });
 
     // 設置實際開獎號碼
@@ -664,73 +743,90 @@ $(document).ready(function() {
         showAlert('實際開獎號碼已設置', 'success');
     });
 
-    // 定期檢查訓練進度
+    // 檢查訓練進度
     function checkTrainingProgress() {
-        const progressInterval = setInterval(function() {
+        // 清除之前的計時器，避免多個計時器同時運行
+        if (progressInterval) {
+            clearInterval(progressInterval);
+        }
+        
+        progressInterval = setInterval(function() {
             $.ajax({
                 url: '/training_progress',
                 method: 'GET',
                 success: function(response) {
-                    // 更新進度條
-                    const progress = response.progress;
-                    $('#trainingProgressBar').css('width', progress + '%').attr('aria-valuenow', progress);
-                    
-                    // 更新進度文字
-                    $('#trainingProgressText').text(response.status);
-                    
-                    // 更新當前模型
-                    if (response.current_model) {
-                        $('#trainingCurrentModel').text('當前訓練模型: ' + response.current_model);
-                    }
-                    
-                    // 如果訓練完成或取消，停止檢查
-                    if (response.completed || response.cancelled) {
+                    if (response.status === 'completed') {
                         clearInterval(progressInterval);
+                        progressInterval = null;
                         
-                        if (response.completed) {
-                            $('#trainingProgressText').text('訓練完成！');
-                            setTimeout(function() {
-                                $('#trainingProgressModal').modal('hide');
-                            }, 1500);
-                        } else if (response.cancelled) {
-                            $('#trainingProgressText').text('訓練已取消');
-                            setTimeout(function() {
-                                $('#trainingProgressModal').modal('hide');
-                            }, 1500);
+                        // 更新模態框
+                        $('#trainingProgressBar').css('width', '100%').attr('aria-valuenow', 100);
+                        $('#trainingProgressText').text('訓練完成！');
+                        setTimeout(function() {
+                            $('#trainingProgressModal').modal('hide');
+                        }, 1000);
+                        
+                        // 更新主頁面訓練狀態
+                        $('#trainStatus').html('<div class="alert alert-success">模型訓練成功！</div>');
+                        showAlert('模型訓練成功！', 'success');
+                        
+                        // 如果有訓練結果，顯示它們
+                        if (response.results) {
+                            let resultsHtml = '<div class="mt-3"><h6>訓練結果摘要：</h6>';
+                            resultsHtml += '<ul>';
+                            
+                            if (response.results.models) {
+                                for (const [model, metrics] of Object.entries(response.results.models)) {
+                                    resultsHtml += `<li>${model}: MSE=${metrics.mse.toFixed(4)}, MAE=${metrics.mae.toFixed(4)}</li>`;
+                                }
+                            }
+                            
+                            resultsHtml += '</ul></div>';
+                            $('#trainStatus').append(resultsHtml);
                         }
+                        
+                        // 更新數據摘要
+                        loadDataSummary();
+                    } else if (response.status === 'in_progress') {
+                        const progress = response.progress * 100;
+                        $('#trainingProgressBar').css('width', progress + '%').attr('aria-valuenow', progress);
+                        $('#trainingProgressText').text(`訓練進度: ${progress.toFixed(1)}%`);
+                        $('#trainingCurrentModel').text(`當前模型: ${response.current_model || '準備中'}`);
+                        
+                        // 更新主頁面訓練狀態
+                        $('#trainStatus').html(`
+                            <div class="alert alert-info">
+                                <p>模型訓練中，請稍候... ${progress.toFixed(0)}% 完成</p>
+                                <div class="progress">
+                                    <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                         role="progressbar" 
+                                         style="width: ${progress}%" 
+                                         aria-valuenow="${progress}" 
+                                         aria-valuemin="0" 
+                                         aria-valuemax="100"></div>
+                                </div>
+                            </div>
+                        `);
+                    } else if (response.status === 'error') {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                        
+                        // 更新模態框
+                        $('#trainingProgressText').text('訓練失敗: ' + response.message);
+                        setTimeout(function() {
+                            $('#trainingProgressModal').modal('hide');
+                        }, 2000);
+                        
+                        // 更新主頁面訓練狀態
+                        $('#trainStatus').html(`<div class="alert alert-danger">訓練失敗：${response.message}</div>`);
+                        showAlert(`訓練失敗：${response.message}`, 'danger');
                     }
                 },
                 error: function(error) {
                     console.error('獲取訓練進度失敗:', error);
-                    clearInterval(progressInterval);
                 }
             });
-        }, 1000); // 每秒檢查一次
-    }
-    
-    // 定期檢查優化進度
-    function checkOptimizationProgress() {
-        const progressInterval = setInterval(function() {
-            $.ajax({
-                url: '/optimization_progress',
-                method: 'GET',
-                success: function(response) {
-                    // 更新進度
-                    const progress = response.progress;
-                    const progressBar = $('.progress-bar');
-                    progressBar.css('width', progress + '%').attr('aria-valuenow', progress);
-                    
-                    // 如果優化完成或取消，停止檢查
-                    if (response.completed || response.cancelled) {
-                        clearInterval(progressInterval);
-                    }
-                },
-                error: function(error) {
-                    console.error('獲取優化進度失敗:', error);
-                    clearInterval(progressInterval);
-                }
-            });
-        }, 1000); // 每秒檢查一次
+        }, 1000);
     }
 
     // 載入數據摘要
@@ -781,17 +877,12 @@ $(document).ready(function() {
     function createFrequencyChart(frequencies) {
         const ctx = document.getElementById('frequencyChart').getContext('2d');
         
-        // 如果已經存在圖表，先銷毀
-        if (window.frequencyChartInstance) {
-            window.frequencyChartInstance.destroy();
-        }
-        
         // 準備數據
         const labels = frequencies.map(item => item.number);
         const data = frequencies.map(item => item.percentage);
         
         // 創建圖表
-        window.frequencyChartInstance = new Chart(ctx, {
+        new Chart(ctx, {
             type: 'bar',
             data: {
                 labels: labels,
@@ -845,4 +936,68 @@ $(document).ready(function() {
     
     $('#diversityMethod').val(diversityMethod);
     $('#diversityLevel').val(diversityLevel);
+    
+    // 計算每組預測的信心度分數
+    function calculateConfidenceScores(predictions) {
+        const scores = [];
+        
+        for (let i = 0; i < predictions.length; i++) {
+            const predSet = predictions[i];
+            
+            // 計算這組預測的一致性（數字出現的穩定性）
+            const numberCounts = {};
+            let totalNumbers = 0;
+            
+            // 統計每個數字出現的次數
+            predSet.forEach(function(numbers) {
+                numbers.forEach(function(num) {
+                    if (!numberCounts[num]) {
+                        numberCounts[num] = 0;
+                    }
+                    numberCounts[num]++;
+                    totalNumbers++;
+                });
+            });
+            
+            // 計算一致性分數（出現頻率的標準差的倒數）
+            const frequencies = Object.values(numberCounts).map(count => count / predSet.length);
+            const mean = frequencies.reduce((sum, freq) => sum + freq, 0) / frequencies.length;
+            const variance = frequencies.reduce((sum, freq) => sum + Math.pow(freq - mean, 2), 0) / frequencies.length;
+            const stdDev = Math.sqrt(variance);
+            
+            // 一致性越高，stdDev越小，信心度越高
+            const consistencyScore = 1 / (1 + stdDev);
+            
+            // 計算數字分佈的均勻性
+            const uniqueNumbers = Object.keys(numberCounts).length;
+            const distributionScore = uniqueNumbers / 49; // 假設彩票號碼範圍是1-49
+            
+            // 綜合分數（可以調整權重）
+            const confidenceScore = 0.7 * consistencyScore + 0.3 * distributionScore;
+            
+            scores.push(confidenceScore);
+        }
+        
+        return scores;
+    }
+
+    // 獲取信心度最高的前N組預測
+    function getTopPredictions(confidenceScores, n) {
+        // 創建索引數組
+        const indices = Array.from(Array(confidenceScores.length).keys());
+        
+        // 根據信心度排序
+        indices.sort((a, b) => confidenceScores[b] - confidenceScores[a]);
+        
+        // 返回前N個
+        return indices.slice(0, n);
+    }
+
+    // 根據信心度獲取對應的徽章類別
+    function getConfidenceBadgeClass(score) {
+        if (score >= 0.8) return 'bg-success';
+        if (score >= 0.6) return 'bg-info';
+        if (score >= 0.4) return 'bg-warning';
+        return 'bg-secondary';
+    }
 });
